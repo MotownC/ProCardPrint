@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProCard Legends Print - Trading Card Sheet Layout</title>
+    <link rel="icon" type="image/png" href="logo.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Teko:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <img src="logo.png" alt="ProCard Legends" class="logo">
+                <div class="header-text">
+                    <h1>PROCARD <span class="highlight">LEGENDS</span> PRINT</h1>
+                    <p class="subtitle">Arrange your 2.5" × 3.5" trading cards for printing</p>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- Left Panel: Upload Area -->
+            <aside class="upload-panel">
+                <div class="upload-section">
+                    <h2>UPLOAD CARDS</h2>
+                    <div class="upload-zone" id="uploadZone">
+                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                        </svg>
+                        <p class="upload-text">Drag & drop card images here</p>
+                        <p class="upload-subtext">or click to browse</p>
+                        <input type="file" id="fileInput" accept="image/*" multiple hidden>
+                    </div>
+                </div>
+
+                <div class="uploaded-cards" id="uploadedCards">
+                    <h3>UPLOADED CARDS</h3>
+                    <div class="card-thumbnails" id="cardThumbnails"></div>
+                </div>
+
+                <div class="actions">
+                    <button class="btn btn-secondary" id="clearBtn">Clear All</button>
+                    <button class="btn btn-secondary" id="printPreviewBtn">Print Preview</button>
+                    <button class="btn btn-primary card-shine" id="generatePdfBtn">Generate PDF</button>
+                </div>
+            </aside>
+
+            <!-- Right Panel: Print Sheet Preview -->
+            <main class="preview-panel">
+                <div class="preview-header">
+                    <h2>PRINT SHEET PREVIEW</h2>
+                    <span class="sheet-size">8.5" × 11"</span>
+                </div>
+
+                <!-- Layout Tabs -->
+                <div class="layout-tabs" id="layoutTabs" style="display: none;">
+                    <button class="tab-btn active" data-layout="front">Front Layout</button>
+                    <button class="tab-btn" data-layout="back">Back Layout (Mirrored)</button>
+                </div>
+
+                <div class="sheet-container">
+                    <!-- Front Sheet -->
+                    <div class="print-sheet" id="printSheet">
+                        <div class="card-slot" data-slot="0">
+                            <span class="slot-number">1</span>
+                        </div>
+                        <div class="card-slot" data-slot="1">
+                            <span class="slot-number">2</span>
+                        </div>
+                        <div class="card-slot" data-slot="2">
+                            <span class="slot-number">3</span>
+                        </div>
+                        <div class="card-slot" data-slot="3">
+                            <span class="slot-number">4</span>
+                        </div>
+                        <div class="card-slot" data-slot="4">
+                            <span class="slot-number">5</span>
+                        </div>
+                        <div class="card-slot" data-slot="5">
+                            <span class="slot-number">6</span>
+                        </div>
+                        <div class="card-slot" data-slot="6">
+                            <span class="slot-number">7</span>
+                        </div>
+                        <div class="card-slot" data-slot="7">
+                            <span class="slot-number">8</span>
+                        </div>
+                        <div class="card-slot" data-slot="8">
+                            <span class="slot-number">9</span>
+                        </div>
+                    </div>
+
+                    <!-- Back Sheet (Mirrored: columns flipped horizontally) -->
+                    <div class="print-sheet" id="backSheet" style="display: none;">
+                        <div class="card-slot" data-slot="0">
+                            <span class="slot-number">3</span>
+                        </div>
+                        <div class="card-slot" data-slot="1">
+                            <span class="slot-number">2</span>
+                        </div>
+                        <div class="card-slot" data-slot="2">
+                            <span class="slot-number">1</span>
+                        </div>
+                        <div class="card-slot" data-slot="3">
+                            <span class="slot-number">6</span>
+                        </div>
+                        <div class="card-slot" data-slot="4">
+                            <span class="slot-number">5</span>
+                        </div>
+                        <div class="card-slot" data-slot="5">
+                            <span class="slot-number">4</span>
+                        </div>
+                        <div class="card-slot" data-slot="6">
+                            <span class="slot-number">9</span>
+                        </div>
+                        <div class="card-slot" data-slot="7">
+                            <span class="slot-number">8</span>
+                        </div>
+                        <div class="card-slot" data-slot="8">
+                            <span class="slot-number">7</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="preview-info">
+                    <p id="cardCount">0 of 9 cards placed</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modal for back card upload -->
+    <div class="modal" id="backCardModal">
+        <div class="modal-content">
+            <h2>ADD CARD BACK?</h2>
+            <p>Does this card have a back side for double-sided printing?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="skipBackBtn">No, Skip</button>
+                <button class="btn btn-primary" id="uploadBackBtn">Yes, Upload Back</button>
+            </div>
+            <input type="file" id="backFileInput" accept="image/*" hidden>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
