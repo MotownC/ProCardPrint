@@ -3,6 +3,7 @@ let uploadedCards = [];
 let cardSlots = Array(9).fill(null);
 let cardBacks = Array(9).fill(null); // Store back images for each slot
 let currentSlotForBack = null; // Track which slot is getting a back
+let showCardBorders = false; // Toggle for thin black card borders
 
 // DOM Elements
 const uploadZone = document.getElementById('uploadZone');
@@ -45,8 +46,18 @@ function setupEventListeners() {
     // Print Preview button
     printPreviewBtn.addEventListener('click', openPrintPreview);
 
-    // Generate PDF button
-    generatePdfBtn.addEventListener('click', generatePDF);
+    // Generate PDF dropdown toggle
+    generatePdfBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById('pdfDropdownMenu');
+        menu.classList.toggle('open');
+    });
+
+    // Close dropdown when clicking elsewhere
+    document.addEventListener('click', () => {
+        const menu = document.getElementById('pdfDropdownMenu');
+        menu.classList.remove('open');
+    });
 
     // Setup card slots for drag and drop (only on front sheet)
     const frontSlots = printSheet.querySelectorAll('.card-slot');
@@ -60,6 +71,14 @@ function setupEventListeners() {
     uploadBackBtn.addEventListener('click', () => backFileInput.click());
     skipBackBtn.addEventListener('click', closeBackModal);
     backFileInput.addEventListener('change', handleBackFileSelect);
+
+    // Card border toggle
+    const borderToggle = document.getElementById('cardBorderToggle');
+    borderToggle.addEventListener('change', (e) => {
+        showCardBorders = e.target.checked;
+        printSheet.classList.toggle('show-card-borders', showCardBorders);
+        backSheet.classList.toggle('show-card-borders', showCardBorders);
+    });
 
     // Layout tab events
     const tabButtons = document.querySelectorAll('.tab-btn');
@@ -291,9 +310,16 @@ function renderSlots() {
     // Render back sheet
     renderSheet(backSheet, true);
 
-    // Show/hide tabs based on whether any cards have backs
+    // Show tabs bar when any cards are placed (for border toggle access)
+    const hasAnyCards = cardSlots.some(slot => slot !== null);
     const hasAnyBacks = cardBacks.some(back => back !== null);
-    layoutTabs.style.display = hasAnyBacks ? 'flex' : 'none';
+    layoutTabs.style.display = hasAnyCards ? 'flex' : 'none';
+
+    // Show/hide Back Layout tab based on whether any cards have backs
+    const backTab = layoutTabs.querySelector('[data-layout="back"]');
+    if (backTab) {
+        backTab.style.display = hasAnyBacks ? '' : 'none';
+    }
 }
 
 // Render a sheet (front or back)
@@ -602,6 +628,11 @@ function openPrintPreview() {
             border: 1px solid #e2e8f0;
         }
 
+        .card-grid.has-border {
+            background: #000000;
+            padding: 0.125in;
+        }
+
         .card img {
             width: 100%;
             height: 100%;
@@ -680,7 +711,7 @@ function openPrintPreview() {
     <!-- Page 1: Fronts -->
     <div class="page" id="frontPage">
         <div class="page-label">Page 1 - Card Fronts</div>
-        <div class="card-grid">
+        <div class="card-grid${showCardBorders ? ' has-border' : ''}">
 `;
 
     // Add front cards
@@ -704,7 +735,7 @@ function openPrintPreview() {
     <!-- Page 2: Backs (Mirrored) -->
     <div class="page" id="backPage">
         <div class="page-label">Page 2 - Card Backs (Mirrored for Double-Sided)</div>
-        <div class="card-grid">
+        <div class="card-grid${showCardBorders ? ' has-border' : ''}">
 `;
 
         // Add back cards (mirrored)
@@ -805,11 +836,20 @@ function openPrintPreview() {
 }
 
 // Generate PDF
-async function generatePDF() {
+async function generatePDF(mode) {
+    // Close dropdown
+    document.getElementById('pdfDropdownMenu').classList.remove('open');
+
     const placedCount = cardSlots.filter(slot => slot !== null).length;
+    const hasAnyBacks = cardBacks.some(back => back !== null);
 
     if (placedCount === 0) {
         alert('Please place at least one card on the sheet before generating PDF.');
+        return;
+    }
+
+    if (mode === 'back' && !hasAnyBacks) {
+        alert('No card backs have been added yet.');
         return;
     }
 
@@ -841,29 +881,47 @@ async function generatePDF() {
         const marginX = (8.5 - totalWidth) / 2;
         const marginY = (11 - totalHeight) / 2;
 
-        // PAGE 1: Card fronts
-        for (let i = 0; i < cardSlots.length; i++) {
-            const card = cardSlots[i];
-            if (card) {
-                const row = Math.floor(i / 3);
-                const col = i % 3;
+        let needsNewPage = false;
 
-                const x = marginX + (col * (cardWidth + spacing));
-                const y = marginY + (row * (cardHeight + spacing));
-
-                try {
-                    pdf.addImage(card.src, 'JPEG', x, y, cardWidth, cardHeight);
-                } catch (error) {
-                    console.error(`Error adding card ${i}:`, error);
-                }
+        // Helper: draw black border background behind card grid
+        function drawBorderBackground() {
+            if (showCardBorders) {
+                pdf.setFillColor(0, 0, 0);
+                pdf.rect(
+                    marginX - spacing, marginY - spacing,
+                    totalWidth + spacing * 2, totalHeight + spacing * 2, 'F'
+                );
             }
         }
 
-        // PAGE 2: Card backs (mirrored horizontally for double-sided printing)
-        const hasAnyBacks = cardBacks.some(back => back !== null);
+        // Card fronts
+        if (mode === 'front' || mode === 'both') {
+            drawBorderBackground();
+            for (let i = 0; i < cardSlots.length; i++) {
+                const card = cardSlots[i];
+                if (card) {
+                    const row = Math.floor(i / 3);
+                    const col = i % 3;
 
-        if (hasAnyBacks) {
-            pdf.addPage('letter', 'portrait');
+                    const x = marginX + (col * (cardWidth + spacing));
+                    const y = marginY + (row * (cardHeight + spacing));
+
+                    try {
+                        pdf.addImage(card.src, 'JPEG', x, y, cardWidth, cardHeight);
+                    } catch (error) {
+                        console.error(`Error adding card ${i}:`, error);
+                    }
+                }
+            }
+            needsNewPage = true;
+        }
+
+        // Card backs (mirrored horizontally for double-sided printing)
+        if ((mode === 'back' || mode === 'both') && hasAnyBacks) {
+            if (needsNewPage) {
+                pdf.addPage('letter', 'portrait');
+            }
+            drawBorderBackground();
 
             for (let i = 0; i < cardBacks.length; i++) {
                 const back = cardBacks[i];
@@ -886,18 +944,133 @@ async function generatePDF() {
             }
         }
 
-        // Save PDF
+        // Save PDF with descriptive filename
         const timestamp = new Date().toISOString().slice(0, 10);
-        pdf.save(`trading-cards-${timestamp}.pdf`);
+        const suffix = mode === 'front' ? '-fronts' : mode === 'back' ? '-backs' : '';
+        pdf.save(`trading-cards${suffix}-${timestamp}.pdf`);
 
-        const backInfo = hasAnyBacks ? ' (with backs on page 2)' : '';
-        alert(`PDF generated successfully! ${placedCount} card(s) included${backInfo}.`);
+        const modeLabel = mode === 'front' ? 'fronts' : mode === 'back' ? 'backs' : 'front + back';
+        alert(`PDF generated (${modeLabel})! ${placedCount} card(s) included.`);
     } catch (error) {
         console.error('Error generating PDF:', error);
         alert('Error generating PDF. Please try again.');
     } finally {
         // Restore button state
-        generatePdfBtn.textContent = originalText;
+        generatePdfBtn.textContent = 'Export ▾';
+        updateCardCount();
+    }
+}
+
+// Export as 300 DPI PNG for Photoshop
+async function exportPNG(mode) {
+    // Close dropdown
+    document.getElementById('pdfDropdownMenu').classList.remove('open');
+
+    const placedCount = cardSlots.filter(slot => slot !== null).length;
+    const hasAnyBacks = cardBacks.some(back => back !== null);
+
+    if (placedCount === 0) {
+        alert('Please place at least one card on the sheet before exporting.');
+        return;
+    }
+
+    if (mode === 'back' && !hasAnyBacks) {
+        alert('No card backs have been added yet.');
+        return;
+    }
+
+    // Show loading state
+    const originalText = generatePdfBtn.textContent;
+    generatePdfBtn.textContent = 'Exporting...';
+    generatePdfBtn.disabled = true;
+
+    try {
+        // 300 DPI: 8.5" x 11" = 2550 x 3300 pixels
+        const DPI = 300;
+        const pageW = 8.5 * DPI;  // 2550
+        const pageH = 11 * DPI;   // 3300
+
+        const cardW = 2.5 * DPI;  // 750
+        const cardH = 3.5 * DPI;  // 1050
+        const gap = 0.125 * DPI;  // 37.5
+
+        const totalW = (cardW * 3) + (gap * 2);
+        const totalH = (cardH * 3) + (gap * 2);
+        const offsetX = (pageW - totalW) / 2;
+        const offsetY = (pageH - totalH) / 2;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = pageW;
+        canvas.height = pageH;
+        const ctx = canvas.getContext('2d');
+
+        // White background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, pageW, pageH);
+
+        // Draw black border background behind card grid
+        if (showCardBorders) {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(
+                offsetX - gap, offsetY - gap,
+                totalW + gap * 2, totalH + gap * 2
+            );
+        }
+
+        // Load and draw card images
+        const drawCard = (src, col, row) => {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const x = offsetX + (col * (cardW + gap));
+                    const y = offsetY + (row * (cardH + gap));
+                    ctx.drawImage(img, x, y, cardW, cardH);
+                    resolve();
+                };
+                img.onerror = () => resolve();
+                img.src = src;
+            });
+        };
+
+        const promises = [];
+
+        if (mode === 'front') {
+            for (let i = 0; i < cardSlots.length; i++) {
+                const card = cardSlots[i];
+                if (card) {
+                    const row = Math.floor(i / 3);
+                    const col = i % 3;
+                    promises.push(drawCard(card.src, col, row));
+                }
+            }
+        } else if (mode === 'back') {
+            for (let i = 0; i < cardBacks.length; i++) {
+                const back = cardBacks[i];
+                if (back) {
+                    const row = Math.floor(i / 3);
+                    const col = i % 3;
+                    const mirroredCol = 2 - col;
+                    promises.push(drawCard(back, mirroredCol, row));
+                }
+            }
+        }
+
+        await Promise.all(promises);
+
+        // Download as PNG
+        const timestamp = new Date().toISOString().slice(0, 10);
+        const suffix = mode === 'front' ? '-fronts' : '-backs';
+        const link = document.createElement('a');
+        link.download = `trading-cards${suffix}-300dpi-${timestamp}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+
+        alert(`PNG exported (${mode}s) at 300 DPI — 2550×3300px.\nOpen in Photoshop for 8.5" × 11" print-ready layout.`);
+    } catch (error) {
+        console.error('Error exporting PNG:', error);
+        alert('Error exporting PNG. Please try again.');
+    } finally {
+        generatePdfBtn.textContent = 'Export ▾';
         updateCardCount();
     }
 }
