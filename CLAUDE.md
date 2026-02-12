@@ -97,6 +97,8 @@ ProCardPrint/
 ### PNG Export (Photoshop)
 - Uses HTML5 Canvas at 300 DPI (2550x3300px)
 - Opens at correct 8.5"x11" dimensions in Photoshop
+- **pHYs chunk injection**: `setPngDpi()` injects PNG metadata so Photoshop reads 300 DPI (not default 72 DPI)
+  - Converts DPI to pixels/meter (300 DPI = 11811 ppm), builds pHYs chunk with CRC32, inserts after IHDR
 - Border background drawn before cards via `fillRect`
 - Downloads as PNG via data URL and anchor click
 
@@ -108,6 +110,7 @@ ProCardPrint/
 4. **Back sheet mirroring**: The HTML slot numbers AND the JS rendering both need to mirror correctly
 5. **Recommended image format**: PNG for lossless quality with crisp text and graphics
 6. **Add Back button**: Uses `onclick` on a `<button>` element appended to the slot (not click on flip container) for reliable event handling through layered absolute-positioned elements
+7. **PNG DPI metadata**: `canvas.toDataURL()` doesn't embed DPI — must inject `pHYs` chunk manually or Photoshop defaults to 72 DPI
 
 ## Target Printer
 

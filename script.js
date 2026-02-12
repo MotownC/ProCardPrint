@@ -1057,12 +1057,14 @@ async function exportPNG(mode) {
 
         await Promise.all(promises);
 
-        // Download as PNG
+        // Download as PNG with 300 DPI metadata
         const timestamp = new Date().toISOString().slice(0, 10);
         const suffix = mode === 'front' ? '-fronts' : '-backs';
+        const pngDataUrl = canvas.toDataURL('image/png');
+        const pngWithDpi = setPngDpi(pngDataUrl, 300);
         const link = document.createElement('a');
         link.download = `trading-cards${suffix}-300dpi-${timestamp}.png`;
-        link.href = canvas.toDataURL('image/png');
+        link.href = pngWithDpi;
         link.click();
 
         alert(`PNG exported (${mode}s) at 300 DPI — 2550×3300px.\nOpen in Photoshop for 8.5" × 11" print-ready layout.`);
@@ -1073,4 +1075,69 @@ async function exportPNG(mode) {
         generatePdfBtn.textContent = 'Export ▾';
         updateCardCount();
     }
+}
+
+// Inject pHYs chunk into PNG to set DPI metadata
+// Without this, Photoshop defaults to 72 DPI
+function setPngDpi(dataUrl, dpi) {
+    // Convert data URL to binary
+    const base64 = dataUrl.split(',')[1];
+    const binaryStr = atob(base64);
+    const original = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+        original[i] = binaryStr.charCodeAt(i);
+    }
+
+    // DPI to pixels per meter: 300 DPI = 11811 pixels/meter
+    const ppm = Math.round(dpi / 0.0254);
+
+    // Build pHYs chunk: 4 bytes X ppm + 4 bytes Y ppm + 1 byte unit (1=meter)
+    const phys = new Uint8Array(21);
+    const view = new DataView(phys.buffer);
+
+    // Length of data (9 bytes)
+    view.setUint32(0, 9);
+    // Chunk type: "pHYs"
+    phys[4] = 0x70; // p
+    phys[5] = 0x48; // H
+    phys[6] = 0x59; // Y
+    phys[7] = 0x73; // s
+    // X pixels per unit
+    view.setUint32(8, ppm);
+    // Y pixels per unit
+    view.setUint32(12, ppm);
+    // Unit: meter
+    phys[16] = 1;
+    // CRC32 over chunk type + data
+    const crc = crc32(phys.slice(4, 17));
+    view.setUint32(17, crc);
+
+    // Insert pHYs after IHDR chunk (8-byte signature + IHDR)
+    // PNG signature is 8 bytes, IHDR chunk is 4(len) + 4(type) + 13(data) + 4(crc) = 25 bytes
+    const insertPos = 8 + 25; // = 33
+
+    // Build new PNG
+    const result = new Uint8Array(original.length + phys.length);
+    result.set(original.slice(0, insertPos));
+    result.set(phys, insertPos);
+    result.set(original.slice(insertPos), insertPos + phys.length);
+
+    // Convert back to data URL
+    let binaryResult = '';
+    for (let i = 0; i < result.length; i++) {
+        binaryResult += String.fromCharCode(result[i]);
+    }
+    return 'data:image/png;base64,' + btoa(binaryResult);
+}
+
+// CRC32 for PNG chunks
+function crc32(data) {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < data.length; i++) {
+        crc ^= data[i];
+        for (let j = 0; j < 8; j++) {
+            crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
+        }
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
 }
