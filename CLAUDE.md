@@ -88,11 +88,18 @@ ProCardPrint/
 - Guided double-sided print workflow with step-by-step confirm dialogs
 - Card border state carries over to print preview via `has-border` class on `card-grid`
 
+### Cut Marks
+- Small black tick marks (0.15") at all four page edges aligned with card boundaries
+- 6 vertical marks on top/bottom edges, 6 horizontal marks on left/right edges
+- Applied across all outputs: preview (`renderCutMarks` divs), print preview (`generatePreviewCutMarks` HTML), PDF (`drawPdfCutMarks` lines), PNG (canvas strokes)
+- Always visible (not tied to border toggle) - guides for cutting cards to size
+
 ### PDF Generation
 - Uses jsPDF with letter size (8.5" x 11")
 - Page 2 mirrors card backs horizontally to match front positions
 - Images converted to JPEG format in PDF for file size
 - Border background drawn before card images so cards sit on top
+- Cut marks drawn after cards via `drawPdfCutMarks()`
 
 ### PNG Export (Photoshop)
 - Uses HTML5 Canvas at 300 DPI (2550x3300px)
@@ -100,6 +107,7 @@ ProCardPrint/
 - **pHYs chunk injection**: `setPngDpi()` injects PNG metadata so Photoshop reads 300 DPI (not default 72 DPI)
   - Converts DPI to pixels/meter (300 DPI = 11811 ppm), builds pHYs chunk with CRC32, inserts after IHDR
 - Border background drawn before cards via `fillRect`
+- Cut marks drawn after cards via canvas strokes
 - Downloads as PNG via data URL and anchor click
 
 ## Common Gotchas

@@ -310,6 +310,10 @@ function renderSlots() {
     // Render back sheet
     renderSheet(backSheet, true);
 
+    // Add cut marks to both sheets
+    renderCutMarks(printSheet);
+    renderCutMarks(backSheet);
+
     // Show tabs bar when any cards are placed (for border toggle access)
     const hasAnyCards = cardSlots.some(slot => slot !== null);
     const hasAnyBacks = cardBacks.some(back => back !== null);
@@ -320,6 +324,80 @@ function renderSlots() {
     if (backTab) {
         backTab.style.display = hasAnyBacks ? '' : 'none';
     }
+}
+
+// Render cut marks on a print sheet (96 DPI)
+function renderCutMarks(sheet) {
+    // Remove existing cut marks
+    sheet.querySelectorAll('.cut-mark').forEach(el => el.remove());
+
+    // Dimensions at 96 DPI
+    const cardW = 240, cardH = 336, gap = 12;
+    const gridW = cardW * 3 + gap * 2; // 744
+    const gridH = cardH * 3 + gap * 2; // 1032
+    const sheetW = 816, sheetH = 1056;
+    const mx = (sheetW - gridW) / 2; // 36
+    const my = (sheetH - gridH) / 2; // 12
+    const markLen = 14; // ~0.15"
+    const markThick = 1;
+
+    // X positions of vertical cuts (left/right edges of each card)
+    const xPositions = [];
+    for (let col = 0; col < 3; col++) {
+        const left = mx + col * (cardW + gap);
+        xPositions.push(left);
+        xPositions.push(left + cardW);
+    }
+
+    // Y positions of horizontal cuts (top/bottom edges of each card)
+    const yPositions = [];
+    for (let row = 0; row < 3; row++) {
+        const top = my + row * (cardH + gap);
+        yPositions.push(top);
+        yPositions.push(top + cardH);
+    }
+
+    // Top and bottom edge tick marks (vertical lines at each x position)
+    xPositions.forEach(x => {
+        // Top tick
+        const topMark = document.createElement('div');
+        topMark.className = 'cut-mark';
+        Object.assign(topMark.style, {
+            position: 'absolute', left: x + 'px', top: '0px',
+            width: markThick + 'px', height: markLen + 'px', background: '#000'
+        });
+        sheet.appendChild(topMark);
+
+        // Bottom tick
+        const botMark = document.createElement('div');
+        botMark.className = 'cut-mark';
+        Object.assign(botMark.style, {
+            position: 'absolute', left: x + 'px', bottom: '0px',
+            width: markThick + 'px', height: markLen + 'px', background: '#000'
+        });
+        sheet.appendChild(botMark);
+    });
+
+    // Left and right edge tick marks (horizontal lines at each y position)
+    yPositions.forEach(y => {
+        // Left tick
+        const leftMark = document.createElement('div');
+        leftMark.className = 'cut-mark';
+        Object.assign(leftMark.style, {
+            position: 'absolute', left: '0px', top: y + 'px',
+            width: markLen + 'px', height: markThick + 'px', background: '#000'
+        });
+        sheet.appendChild(leftMark);
+
+        // Right tick
+        const rightMark = document.createElement('div');
+        rightMark.className = 'cut-mark';
+        Object.assign(rightMark.style, {
+            position: 'absolute', right: '0px', top: y + 'px',
+            width: markLen + 'px', height: markThick + 'px', background: '#000'
+        });
+        sheet.appendChild(rightMark);
+    });
 }
 
 // Render a sheet (front or back)
@@ -487,6 +565,40 @@ function updateCardCount() {
     printPreviewBtn.disabled = placedCount === 0;
 }
 
+// Generate cut mark HTML for print preview pages (in inches)
+function generatePreviewCutMarks() {
+    const cardW = 2.5, cardH = 3.5, gap = 0.125;
+    const gridW = cardW * 3 + gap * 2;
+    const gridH = cardH * 3 + gap * 2;
+    const pageW = 8.5, pageH = 11;
+    const mx = (pageW - gridW) / 2;
+    const my = (pageH - gridH) / 2;
+    const markLen = 0.15;
+    let marks = '';
+
+    // X positions of vertical cuts
+    for (let col = 0; col < 3; col++) {
+        const left = mx + col * (cardW + gap);
+        const right = left + cardW;
+        [left, right].forEach(x => {
+            marks += `<div class="cut-mark" style="left:${x}in;top:0;width:1px;height:${markLen}in;"></div>`;
+            marks += `<div class="cut-mark" style="left:${x}in;bottom:0;width:1px;height:${markLen}in;"></div>`;
+        });
+    }
+
+    // Y positions of horizontal cuts
+    for (let row = 0; row < 3; row++) {
+        const top = my + row * (cardH + gap);
+        const bottom = top + cardH;
+        [top, bottom].forEach(y => {
+            marks += `<div class="cut-mark" style="top:${y}in;left:0;width:${markLen}in;height:1px;"></div>`;
+            marks += `<div class="cut-mark" style="top:${y}in;right:0;width:${markLen}in;height:1px;"></div>`;
+        });
+    }
+
+    return marks;
+}
+
 // Open Print Preview
 function openPrintPreview() {
     const placedCount = cardSlots.filter(slot => slot !== null).length;
@@ -605,6 +717,12 @@ function openPrintPreview() {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
             position: relative;
             page-break-after: always;
+            overflow: hidden;
+        }
+
+        .cut-mark {
+            position: absolute;
+            background: #000;
         }
 
         .page:last-child {
@@ -726,6 +844,7 @@ function openPrintPreview() {
 
     html += `
         </div>
+        ${generatePreviewCutMarks()}
     </div>
 `;
 
@@ -755,6 +874,7 @@ function openPrintPreview() {
 
         html += `
         </div>
+        ${generatePreviewCutMarks()}
     </div>
 `;
     }
@@ -883,6 +1003,33 @@ async function generatePDF(mode) {
 
         let needsNewPage = false;
 
+        // Helper: draw cut marks at page edges
+        function drawPdfCutMarks() {
+            const markLen = 0.15;
+            pdf.setDrawColor(0, 0, 0);
+            pdf.setLineWidth(0.01);
+
+            // X positions (left/right edges of each card)
+            for (let col = 0; col < 3; col++) {
+                const left = marginX + col * (cardWidth + spacing);
+                const right = left + cardWidth;
+                [left, right].forEach(x => {
+                    pdf.line(x, 0, x, markLen);           // top
+                    pdf.line(x, 11 - markLen, x, 11);     // bottom
+                });
+            }
+
+            // Y positions (top/bottom edges of each card)
+            for (let row = 0; row < 3; row++) {
+                const top = marginY + row * (cardHeight + spacing);
+                const bottom = top + cardHeight;
+                [top, bottom].forEach(y => {
+                    pdf.line(0, y, markLen, y);            // left
+                    pdf.line(8.5 - markLen, y, 8.5, y);    // right
+                });
+            }
+        }
+
         // Helper: draw black border background behind card grid
         function drawBorderBackground() {
             if (showCardBorders) {
@@ -913,6 +1060,7 @@ async function generatePDF(mode) {
                     }
                 }
             }
+            drawPdfCutMarks();
             needsNewPage = true;
         }
 
@@ -942,6 +1090,7 @@ async function generatePDF(mode) {
                     }
                 }
             }
+            drawPdfCutMarks();
         }
 
         // Save PDF with descriptive filename
@@ -1056,6 +1205,29 @@ async function exportPNG(mode) {
         }
 
         await Promise.all(promises);
+
+        // Draw cut marks at page edges
+        const markLen = 0.15 * DPI; // 45px at 300 DPI
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+
+        for (let col = 0; col < 3; col++) {
+            const left = offsetX + col * (cardW + gap);
+            const right = left + cardW;
+            [left, right].forEach(x => {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, markLen); ctx.stroke();             // top
+                ctx.beginPath(); ctx.moveTo(x, pageH - markLen); ctx.lineTo(x, pageH); ctx.stroke();  // bottom
+            });
+        }
+
+        for (let row = 0; row < 3; row++) {
+            const top = offsetY + row * (cardH + gap);
+            const bottom = top + cardH;
+            [top, bottom].forEach(y => {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(markLen, y); ctx.stroke();               // left
+                ctx.beginPath(); ctx.moveTo(pageW - markLen, y); ctx.lineTo(pageW, y); ctx.stroke();   // right
+            });
+        }
 
         // Download as PNG with 300 DPI metadata
         const timestamp = new Date().toISOString().slice(0, 10);
