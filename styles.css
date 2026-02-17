@@ -454,6 +454,60 @@ header h1 .highlight {
     color: #22d3ee;
 }
 
+/* Paper Size Toggle */
+.paper-size-toggle {
+    display: flex;
+    border: 2px solid #334155;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-left: 0.5rem;
+}
+
+.paper-size-toggle .size-btn {
+    padding: 0.5rem 0.75rem;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-family: 'Teko', sans-serif;
+    font-size: 1.1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.paper-size-toggle .size-btn:first-child {
+    border-right: 1px solid #334155;
+}
+
+.paper-size-toggle .size-btn:hover {
+    color: #60a5fa;
+}
+
+.paper-size-toggle .size-btn.active {
+    background: #3b82f6;
+    color: white;
+}
+
+/* 4x6 Photo Paper - 4" x 6" at 96 DPI = 384px x 576px */
+.print-sheet.size-4x6 {
+    width: 384px;
+    height: 576px;
+    grid-template-columns: 240px;
+    grid-template-rows: 336px;
+}
+
+.print-sheet.size-4x6 .card-slot:not([data-slot="0"]) {
+    display: none;
+}
+
+/* Card border for 4x6 - single card */
+.print-sheet.size-4x6.show-card-borders::before {
+    /* Single card: 240 + 24 = 264px wide, 336 + 24 = 360px tall */
+    width: 264px;
+    height: 360px;
+}
+
 /* Card border when enabled - black background behind grid fills gaps + outer edge */
 .print-sheet.show-card-borders {
     position: relative;

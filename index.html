@@ -65,7 +65,7 @@
             <main class="preview-panel">
                 <div class="preview-header">
                     <h2>PRINT SHEET PREVIEW</h2>
-                    <span class="sheet-size">8.5" × 11"</span>
+                    <span class="sheet-size" id="sheetSizeLabel">8.5" × 11"</span>
                 </div>
 
                 <!-- Layout Tabs -->
@@ -76,6 +76,10 @@
                         <input type="checkbox" id="cardBorderToggle">
                         <span class="border-toggle-label">Card Border</span>
                     </label>
+                    <div class="paper-size-toggle" id="paperSizeToggle">
+                        <button class="size-btn active" data-size="letter">Letter</button>
+                        <button class="size-btn" data-size="4x6">4×6</button>
+                    </div>
                 </div>
 
                 <div class="sheet-container">

@@ -4,6 +4,7 @@ let cardSlots = Array(9).fill(null);
 let cardBacks = Array(9).fill(null); // Store back images for each slot
 let currentSlotForBack = null; // Track which slot is getting a back
 let showCardBorders = false; // Toggle for thin black card borders
+let paperSize = 'letter'; // 'letter' or '4x6'
 
 // DOM Elements
 const uploadZone = document.getElementById('uploadZone');
@@ -84,6 +85,22 @@ function setupEventListeners() {
     const tabButtons = document.querySelectorAll('.tab-btn');
     tabButtons.forEach(btn => {
         btn.addEventListener('click', () => switchLayout(btn.dataset.layout));
+    });
+
+    // Paper size toggle
+    const sizeButtons = document.querySelectorAll('.paper-size-toggle .size-btn');
+    sizeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            sizeButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            paperSize = btn.dataset.size;
+            const is4x6 = paperSize === '4x6';
+            printSheet.classList.toggle('size-4x6', is4x6);
+            backSheet.classList.toggle('size-4x6', is4x6);
+            document.getElementById('sheetSizeLabel').textContent = is4x6 ? '4" × 6"' : '8.5" × 11"';
+            renderSlots();
+            updateCardCount();
+        });
     });
 }
 
@@ -333,17 +350,20 @@ function renderCutMarks(sheet) {
 
     // Dimensions at 96 DPI
     const cardW = 240, cardH = 336, gap = 12;
-    const gridW = cardW * 3 + gap * 2; // 744
-    const gridH = cardH * 3 + gap * 2; // 1032
-    const sheetW = 816, sheetH = 1056;
-    const mx = (sheetW - gridW) / 2; // 36
-    const my = (sheetH - gridH) / 2; // 12
+    const is4x6 = paperSize === '4x6';
+    const cols = is4x6 ? 1 : 3, rows = is4x6 ? 1 : 3;
+    const gridW = cardW * cols + gap * (cols - 1);
+    const gridH = cardH * rows + gap * (rows - 1);
+    const sheetW = is4x6 ? 384 : 816;
+    const sheetH = is4x6 ? 576 : 1056;
+    const mx = (sheetW - gridW) / 2;
+    const my = (sheetH - gridH) / 2;
     const markLen = 14; // ~0.15"
     const markThick = 1;
 
     // X positions of vertical cuts (left/right edges of each card)
     const xPositions = [];
-    for (let col = 0; col < 3; col++) {
+    for (let col = 0; col < cols; col++) {
         const left = mx + col * (cardW + gap);
         xPositions.push(left);
         xPositions.push(left + cardW);
@@ -351,7 +371,7 @@ function renderCutMarks(sheet) {
 
     // Y positions of horizontal cuts (top/bottom edges of each card)
     const yPositions = [];
-    for (let row = 0; row < 3; row++) {
+    for (let row = 0; row < rows; row++) {
         const top = my + row * (cardH + gap);
         yPositions.push(top);
         yPositions.push(top + cardH);
@@ -557,8 +577,11 @@ function clearAll() {
 
 // Update card count
 function updateCardCount() {
-    const placedCount = cardSlots.filter(slot => slot !== null).length;
-    cardCount.textContent = `${placedCount} of 9 cards placed`;
+    const maxCards = paperSize === '4x6' ? 1 : 9;
+    const placedCount = paperSize === '4x6'
+        ? (cardSlots[0] !== null ? 1 : 0)
+        : cardSlots.filter(slot => slot !== null).length;
+    cardCount.textContent = `${placedCount} of ${maxCards} card${maxCards > 1 ? 's' : ''} placed`;
 
     // Enable/disable buttons
     generatePdfBtn.disabled = placedCount === 0;
@@ -568,16 +591,18 @@ function updateCardCount() {
 // Generate cut mark HTML for print preview pages (in inches)
 function generatePreviewCutMarks() {
     const cardW = 2.5, cardH = 3.5, gap = 0.125;
-    const gridW = cardW * 3 + gap * 2;
-    const gridH = cardH * 3 + gap * 2;
-    const pageW = 8.5, pageH = 11;
+    const is4x6 = paperSize === '4x6';
+    const cols = is4x6 ? 1 : 3, rows = is4x6 ? 1 : 3;
+    const pageW = is4x6 ? 4 : 8.5, pageH = is4x6 ? 6 : 11;
+    const gridW = cardW * cols + gap * (cols - 1);
+    const gridH = cardH * rows + gap * (rows - 1);
     const mx = (pageW - gridW) / 2;
     const my = (pageH - gridH) / 2;
     const markLen = 0.15;
     let marks = '';
 
     // X positions of vertical cuts
-    for (let col = 0; col < 3; col++) {
+    for (let col = 0; col < cols; col++) {
         const left = mx + col * (cardW + gap);
         const right = left + cardW;
         [left, right].forEach(x => {
@@ -587,7 +612,7 @@ function generatePreviewCutMarks() {
     }
 
     // Y positions of horizontal cuts
-    for (let row = 0; row < 3; row++) {
+    for (let row = 0; row < rows; row++) {
         const top = my + row * (cardH + gap);
         const bottom = top + cardH;
         [top, bottom].forEach(y => {
@@ -601,14 +626,27 @@ function generatePreviewCutMarks() {
 
 // Open Print Preview
 function openPrintPreview() {
-    const placedCount = cardSlots.filter(slot => slot !== null).length;
+    const is4x6 = paperSize === '4x6';
+    const placedCount = is4x6
+        ? (cardSlots[0] !== null ? 1 : 0)
+        : cardSlots.filter(slot => slot !== null).length;
 
     if (placedCount === 0) {
-        alert('Please place at least one card on the sheet before previewing.');
+        alert(is4x6
+            ? 'Please place a card in slot 1 before previewing.'
+            : 'Please place at least one card on the sheet before previewing.');
         return;
     }
 
-    const hasAnyBacks = cardBacks.some(back => back !== null);
+    const hasAnyBacks = is4x6
+        ? cardBacks[0] !== null
+        : cardBacks.some(back => back !== null);
+
+    const pageW = is4x6 ? '4in' : '8.5in';
+    const pageH = is4x6 ? '6in' : '11in';
+    const gridCols = is4x6 ? 1 : 3;
+    const gridRows = is4x6 ? 1 : 3;
+    const totalSlots = is4x6 ? 1 : 9;
 
     // Create print preview window
     const previewWindow = window.open('', 'Print Preview', 'width=900,height=1100');
@@ -636,7 +674,7 @@ function openPrintPreview() {
         }
 
         .controls {
-            max-width: 8.5in;
+            max-width: ${pageW};
             margin: 0 auto 1.5rem;
             text-align: center;
         }
@@ -710,8 +748,8 @@ function openPrintPreview() {
         }
 
         .page {
-            width: 8.5in;
-            height: 11in;
+            width: ${pageW};
+            height: ${pageH};
             background: white;
             margin: 0 auto 2rem;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -731,12 +769,10 @@ function openPrintPreview() {
 
         .card-grid {
             position: absolute;
-            top: 0.125in;
-            left: 50%;
-            transform: translateX(-50%);
+            ${is4x6 ? `top: 50%; left: 50%; transform: translate(-50%, -50%);` : `top: 0.125in; left: 50%; transform: translateX(-50%);`}
             display: grid;
-            grid-template-columns: repeat(3, 2.5in);
-            grid-template-rows: repeat(3, 3.5in);
+            grid-template-columns: repeat(${gridCols}, 2.5in);
+            grid-template-rows: repeat(${gridRows}, 3.5in);
             gap: 0.125in;
         }
 
@@ -805,7 +841,7 @@ function openPrintPreview() {
 </head>
 <body>
     <div class="controls">
-        <h1>Print Preview - ${hasAnyBacks ? '2 Pages' : '1 Page'}</h1>
+        <h1>Print Preview - ${hasAnyBacks ? '2 Pages' : '1 Page'}${is4x6 ? ' (4×6 Photo)' : ''}</h1>
 
         ${hasAnyBacks ? `
         <div class="view-toggle">
@@ -828,12 +864,12 @@ function openPrintPreview() {
 
     <!-- Page 1: Fronts -->
     <div class="page" id="frontPage">
-        <div class="page-label">Page 1 - Card Fronts</div>
+        <div class="page-label">Page 1 - Card Front${is4x6 ? ' (4×6)' : 's'}</div>
         <div class="card-grid${showCardBorders ? ' has-border' : ''}">
 `;
 
     // Add front cards
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < totalSlots; i++) {
         const card = cardSlots[i];
         if (card) {
             html += `<div class="card"><img src="${card.src}" alt="Card ${i + 1}"></div>`;
@@ -853,22 +889,32 @@ function openPrintPreview() {
         html += `
     <!-- Page 2: Backs (Mirrored) -->
     <div class="page" id="backPage">
-        <div class="page-label">Page 2 - Card Backs (Mirrored for Double-Sided)</div>
+        <div class="page-label">Page 2 - Card Back${is4x6 ? ' (4×6)' : 's (Mirrored for Double-Sided)'}</div>
         <div class="card-grid${showCardBorders ? ' has-border' : ''}">
 `;
 
-        // Add back cards (mirrored)
-        for (let i = 0; i < 9; i++) {
-            const row = Math.floor(i / 3);
-            const col = i % 3;
-            const mirroredCol = 2 - col;
-            const mirroredIndex = row * 3 + mirroredCol;
-
-            const back = cardBacks[mirroredIndex];
+        if (is4x6) {
+            // Single card back — no mirroring needed
+            const back = cardBacks[0];
             if (back) {
-                html += `<div class="card"><img src="${back}" alt="Card ${mirroredIndex + 1} back"></div>`;
+                html += `<div class="card"><img src="${back}" alt="Card 1 back"></div>`;
             } else {
                 html += `<div class="card"></div>`;
+            }
+        } else {
+            // Add back cards (mirrored)
+            for (let i = 0; i < 9; i++) {
+                const row = Math.floor(i / 3);
+                const col = i % 3;
+                const mirroredCol = 2 - col;
+                const mirroredIndex = row * 3 + mirroredCol;
+
+                const back = cardBacks[mirroredIndex];
+                if (back) {
+                    html += `<div class="card"><img src="${back}" alt="Card ${mirroredIndex + 1} back"></div>`;
+                } else {
+                    html += `<div class="card"></div>`;
+                }
             }
         }
 
@@ -960,11 +1006,18 @@ async function generatePDF(mode) {
     // Close dropdown
     document.getElementById('pdfDropdownMenu').classList.remove('open');
 
-    const placedCount = cardSlots.filter(slot => slot !== null).length;
-    const hasAnyBacks = cardBacks.some(back => back !== null);
+    const is4x6 = paperSize === '4x6';
+    const placedCount = is4x6
+        ? (cardSlots[0] !== null ? 1 : 0)
+        : cardSlots.filter(slot => slot !== null).length;
+    const hasAnyBacks = is4x6
+        ? cardBacks[0] !== null
+        : cardBacks.some(back => back !== null);
 
     if (placedCount === 0) {
-        alert('Please place at least one card on the sheet before generating PDF.');
+        alert(is4x6
+            ? 'Please place a card in slot 1 before generating PDF.'
+            : 'Please place at least one card on the sheet before generating PDF.');
         return;
     }
 
@@ -981,11 +1034,16 @@ async function generatePDF(mode) {
     try {
         const { jsPDF } = window.jspdf;
 
-        // Create PDF in letter size (8.5 x 11 inches)
+        const pageW = is4x6 ? 4 : 8.5;
+        const pageH = is4x6 ? 6 : 11;
+        const cols = is4x6 ? 1 : 3;
+        const rows = is4x6 ? 1 : 3;
+
+        // Create PDF
         const pdf = new jsPDF({
             orientation: 'portrait',
             unit: 'in',
-            format: 'letter'
+            format: is4x6 ? [4, 6] : 'letter'
         });
 
         // Card dimensions in inches
@@ -995,11 +1053,11 @@ async function generatePDF(mode) {
         // Spacing between cards in inches (0.125" = 1/8 inch for cutting buffer)
         const spacing = 0.125;
 
-        // Calculate margins to center the 3x3 grid with spacing
-        const totalWidth = (cardWidth * 3) + (spacing * 2);
-        const totalHeight = (cardHeight * 3) + (spacing * 2);
-        const marginX = (8.5 - totalWidth) / 2;
-        const marginY = (11 - totalHeight) / 2;
+        // Calculate margins to center the grid
+        const totalWidth = (cardWidth * cols) + (spacing * (cols - 1));
+        const totalHeight = (cardHeight * rows) + (spacing * (rows - 1));
+        const marginX = (pageW - totalWidth) / 2;
+        const marginY = (pageH - totalHeight) / 2;
 
         let needsNewPage = false;
 
@@ -1010,22 +1068,22 @@ async function generatePDF(mode) {
             pdf.setLineWidth(0.01);
 
             // X positions (left/right edges of each card)
-            for (let col = 0; col < 3; col++) {
+            for (let col = 0; col < cols; col++) {
                 const left = marginX + col * (cardWidth + spacing);
                 const right = left + cardWidth;
                 [left, right].forEach(x => {
-                    pdf.line(x, 0, x, markLen);           // top
-                    pdf.line(x, 11 - markLen, x, 11);     // bottom
+                    pdf.line(x, 0, x, markLen);                 // top
+                    pdf.line(x, pageH - markLen, x, pageH);     // bottom
                 });
             }
 
             // Y positions (top/bottom edges of each card)
-            for (let row = 0; row < 3; row++) {
+            for (let row = 0; row < rows; row++) {
                 const top = marginY + row * (cardHeight + spacing);
                 const bottom = top + cardHeight;
                 [top, bottom].forEach(y => {
-                    pdf.line(0, y, markLen, y);            // left
-                    pdf.line(8.5 - markLen, y, 8.5, y);    // right
+                    pdf.line(0, y, markLen, y);                  // left
+                    pdf.line(pageW - markLen, y, pageW, y);      // right
                 });
             }
         }
@@ -1044,11 +1102,12 @@ async function generatePDF(mode) {
         // Card fronts
         if (mode === 'front' || mode === 'both') {
             drawBorderBackground();
-            for (let i = 0; i < cardSlots.length; i++) {
+            const slotCount = is4x6 ? 1 : cardSlots.length;
+            for (let i = 0; i < slotCount; i++) {
                 const card = cardSlots[i];
                 if (card) {
-                    const row = Math.floor(i / 3);
-                    const col = i % 3;
+                    const row = Math.floor(i / cols);
+                    const col = i % cols;
 
                     const x = marginX + (col * (cardWidth + spacing));
                     const y = marginY + (row * (cardHeight + spacing));
@@ -1067,26 +1126,38 @@ async function generatePDF(mode) {
         // Card backs (mirrored horizontally for double-sided printing)
         if ((mode === 'back' || mode === 'both') && hasAnyBacks) {
             if (needsNewPage) {
-                pdf.addPage('letter', 'portrait');
+                pdf.addPage(is4x6 ? [4, 6] : 'letter', 'portrait');
             }
             drawBorderBackground();
 
-            for (let i = 0; i < cardBacks.length; i++) {
-                const back = cardBacks[i];
+            if (is4x6) {
+                // Single card back — centered, no mirroring needed
+                const back = cardBacks[0];
                 if (back) {
-                    const row = Math.floor(i / 3);
-                    const col = i % 3;
-
-                    // Mirror the column: 0->2, 1->1, 2->0
-                    const mirroredCol = 2 - col;
-
-                    const x = marginX + (mirroredCol * (cardWidth + spacing));
-                    const y = marginY + (row * (cardHeight + spacing));
-
                     try {
-                        pdf.addImage(back, 'JPEG', x, y, cardWidth, cardHeight);
+                        pdf.addImage(back, 'JPEG', marginX, marginY, cardWidth, cardHeight);
                     } catch (error) {
-                        console.error(`Error adding back for card ${i}:`, error);
+                        console.error('Error adding back for card 0:', error);
+                    }
+                }
+            } else {
+                for (let i = 0; i < cardBacks.length; i++) {
+                    const back = cardBacks[i];
+                    if (back) {
+                        const row = Math.floor(i / 3);
+                        const col = i % 3;
+
+                        // Mirror the column: 0->2, 1->1, 2->0
+                        const mirroredCol = 2 - col;
+
+                        const x = marginX + (mirroredCol * (cardWidth + spacing));
+                        const y = marginY + (row * (cardHeight + spacing));
+
+                        try {
+                            pdf.addImage(back, 'JPEG', x, y, cardWidth, cardHeight);
+                        } catch (error) {
+                            console.error(`Error adding back for card ${i}:`, error);
+                        }
                     }
                 }
             }
@@ -1095,8 +1166,9 @@ async function generatePDF(mode) {
 
         // Save PDF with descriptive filename
         const timestamp = new Date().toISOString().slice(0, 10);
+        const sizeSuffix = is4x6 ? '-4x6' : '';
         const suffix = mode === 'front' ? '-fronts' : mode === 'back' ? '-backs' : '';
-        pdf.save(`trading-cards${suffix}-${timestamp}.pdf`);
+        pdf.save(`trading-cards${sizeSuffix}${suffix}-${timestamp}.pdf`);
 
         const modeLabel = mode === 'front' ? 'fronts' : mode === 'back' ? 'backs' : 'front + back';
         alert(`PDF generated (${modeLabel})! ${placedCount} card(s) included.`);
@@ -1115,11 +1187,18 @@ async function exportPNG(mode) {
     // Close dropdown
     document.getElementById('pdfDropdownMenu').classList.remove('open');
 
-    const placedCount = cardSlots.filter(slot => slot !== null).length;
-    const hasAnyBacks = cardBacks.some(back => back !== null);
+    const is4x6 = paperSize === '4x6';
+    const placedCount = is4x6
+        ? (cardSlots[0] !== null ? 1 : 0)
+        : cardSlots.filter(slot => slot !== null).length;
+    const hasAnyBacks = is4x6
+        ? cardBacks[0] !== null
+        : cardBacks.some(back => back !== null);
 
     if (placedCount === 0) {
-        alert('Please place at least one card on the sheet before exporting.');
+        alert(is4x6
+            ? 'Please place a card in slot 1 before exporting.'
+            : 'Please place at least one card on the sheet before exporting.');
         return;
     }
 
@@ -1134,17 +1213,21 @@ async function exportPNG(mode) {
     generatePdfBtn.disabled = true;
 
     try {
-        // 300 DPI: 8.5" x 11" = 2550 x 3300 pixels
         const DPI = 300;
-        const pageW = 8.5 * DPI;  // 2550
-        const pageH = 11 * DPI;   // 3300
+        const pgW = is4x6 ? 4 : 8.5;
+        const pgH = is4x6 ? 6 : 11;
+        const cols = is4x6 ? 1 : 3;
+        const rowCount = is4x6 ? 1 : 3;
+
+        const pageW = pgW * DPI;
+        const pageH = pgH * DPI;
 
         const cardW = 2.5 * DPI;  // 750
         const cardH = 3.5 * DPI;  // 1050
         const gap = 0.125 * DPI;  // 37.5
 
-        const totalW = (cardW * 3) + (gap * 2);
-        const totalH = (cardH * 3) + (gap * 2);
+        const totalW = (cardW * cols) + (gap * (cols - 1));
+        const totalH = (cardH * rowCount) + (gap * (rowCount - 1));
         const offsetX = (pageW - totalW) / 2;
         const offsetY = (pageH - totalH) / 2;
 
@@ -1184,22 +1267,30 @@ async function exportPNG(mode) {
         const promises = [];
 
         if (mode === 'front') {
-            for (let i = 0; i < cardSlots.length; i++) {
+            const slotCount = is4x6 ? 1 : cardSlots.length;
+            for (let i = 0; i < slotCount; i++) {
                 const card = cardSlots[i];
                 if (card) {
-                    const row = Math.floor(i / 3);
-                    const col = i % 3;
+                    const row = Math.floor(i / cols);
+                    const col = i % cols;
                     promises.push(drawCard(card.src, col, row));
                 }
             }
         } else if (mode === 'back') {
-            for (let i = 0; i < cardBacks.length; i++) {
-                const back = cardBacks[i];
+            if (is4x6) {
+                const back = cardBacks[0];
                 if (back) {
-                    const row = Math.floor(i / 3);
-                    const col = i % 3;
-                    const mirroredCol = 2 - col;
-                    promises.push(drawCard(back, mirroredCol, row));
+                    promises.push(drawCard(back, 0, 0));
+                }
+            } else {
+                for (let i = 0; i < cardBacks.length; i++) {
+                    const back = cardBacks[i];
+                    if (back) {
+                        const row = Math.floor(i / 3);
+                        const col = i % 3;
+                        const mirroredCol = 2 - col;
+                        promises.push(drawCard(back, mirroredCol, row));
+                    }
                 }
             }
         }
@@ -1207,11 +1298,11 @@ async function exportPNG(mode) {
         await Promise.all(promises);
 
         // Draw cut marks at page edges
-        const markLen = 0.15 * DPI; // 45px at 300 DPI
+        const markLen = 0.15 * DPI;
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 2;
 
-        for (let col = 0; col < 3; col++) {
+        for (let col = 0; col < cols; col++) {
             const left = offsetX + col * (cardW + gap);
             const right = left + cardW;
             [left, right].forEach(x => {
@@ -1220,7 +1311,7 @@ async function exportPNG(mode) {
             });
         }
 
-        for (let row = 0; row < 3; row++) {
+        for (let row = 0; row < rowCount; row++) {
             const top = offsetY + row * (cardH + gap);
             const bottom = top + cardH;
             [top, bottom].forEach(y => {
@@ -1231,15 +1322,18 @@ async function exportPNG(mode) {
 
         // Download as PNG with 300 DPI metadata
         const timestamp = new Date().toISOString().slice(0, 10);
+        const sizeSuffix = is4x6 ? '-4x6' : '';
         const suffix = mode === 'front' ? '-fronts' : '-backs';
         const pngDataUrl = canvas.toDataURL('image/png');
         const pngWithDpi = setPngDpi(pngDataUrl, 300);
         const link = document.createElement('a');
-        link.download = `trading-cards${suffix}-300dpi-${timestamp}.png`;
+        link.download = `trading-cards${sizeSuffix}${suffix}-300dpi-${timestamp}.png`;
         link.href = pngWithDpi;
         link.click();
 
-        alert(`PNG exported (${mode}s) at 300 DPI — 2550×3300px.\nOpen in Photoshop for 8.5" × 11" print-ready layout.`);
+        const pxW = Math.round(pageW);
+        const pxH = Math.round(pageH);
+        alert(`PNG exported (${mode}s) at 300 DPI — ${pxW}×${pxH}px.\nOpen in Photoshop for ${pgW}" × ${pgH}" print-ready layout.`);
     } catch (error) {
         console.error('Error exporting PNG:', error);
         alert('Error exporting PNG. Please try again.');
