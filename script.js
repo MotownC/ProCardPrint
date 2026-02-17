@@ -428,14 +428,19 @@ function renderSheet(sheetElement, isBackSheet) {
         let card, back;
 
         if (isBackSheet) {
-            // For back sheet, mirror the positions
-            const row = Math.floor(index / 3);
-            const col = index % 3;
-            const mirroredCol = 2 - col;
-            const mirroredIndex = row * 3 + mirroredCol;
+            // For back sheet, mirror the positions (skip for 4x6 single card)
+            if (paperSize === '4x6') {
+                card = cardSlots[index];
+                back = cardBacks[index];
+            } else {
+                const row = Math.floor(index / 3);
+                const col = index % 3;
+                const mirroredCol = 2 - col;
+                const mirroredIndex = row * 3 + mirroredCol;
 
-            card = cardSlots[mirroredIndex];
-            back = cardBacks[mirroredIndex];
+                card = cardSlots[mirroredIndex];
+                back = cardBacks[mirroredIndex];
+            }
         } else {
             // Front sheet uses normal positions
             card = cardSlots[index];
