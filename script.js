@@ -21,6 +21,26 @@ const backCardModal = document.getElementById('backCardModal');
 const uploadBackBtn = document.getElementById('uploadBackBtn');
 const skipBackBtn = document.getElementById('skipBackBtn');
 const backFileInput = document.getElementById('backFileInput');
+const alertModal = document.getElementById('alertModal');
+const alertIcon = document.getElementById('alertIcon');
+const alertMessage = document.getElementById('alertMessage');
+const alertOkBtn = document.getElementById('alertOkBtn');
+
+// Themed alert modal
+function showAlert(message, type = 'success') {
+    const icons = { success: '✓', warning: '⚠', error: '✕' };
+    alertIcon.textContent = icons[type] || icons.success;
+    alertMessage.innerHTML = message.replace(/\n/g, '<br>');
+    alertModal.className = 'modal active alert-' + type;
+}
+
+alertOkBtn.addEventListener('click', () => {
+    alertModal.className = 'modal';
+});
+
+alertModal.addEventListener('click', (e) => {
+    if (e.target === alertModal) alertModal.className = 'modal';
+});
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -358,7 +378,7 @@ function renderCutMarks(sheet) {
     const sheetH = is4x6 ? 576 : 1056;
     const mx = (sheetW - gridW) / 2;
     const my = (sheetH - gridH) / 2;
-    const markLen = 14; // ~0.15"
+    const markLen = is4x6 ? 34 : 14; // 4x6: ~0.35" (clears printer margins), letter: ~0.15"
     const markThick = 1;
 
     // X positions of vertical cuts (left/right edges of each card)
@@ -603,7 +623,7 @@ function generatePreviewCutMarks() {
     const gridH = cardH * rows + gap * (rows - 1);
     const mx = (pageW - gridW) / 2;
     const my = (pageH - gridH) / 2;
-    const markLen = 0.15;
+    const markLen = is4x6 ? 0.35 : 0.15;
     let marks = '';
 
     // X positions of vertical cuts
@@ -637,9 +657,9 @@ function openPrintPreview() {
         : cardSlots.filter(slot => slot !== null).length;
 
     if (placedCount === 0) {
-        alert(is4x6
+        showAlert(is4x6
             ? 'Please place a card in slot 1 before previewing.'
-            : 'Please place at least one card on the sheet before previewing.');
+            : 'Please place at least one card on the sheet before previewing.', 'warning');
         return;
     }
 
@@ -991,7 +1011,7 @@ function openPrintPreview() {
                     if (confirm(flipInstructions)) {
                         printPage('back');
                         setTimeout(() => {
-                            alert('Double-sided printing complete! ✓');
+                            showAlert('Double-sided printing complete!', 'success');
                         }, 500);
                     }
                 }, 1000);
@@ -1020,14 +1040,14 @@ async function generatePDF(mode) {
         : cardBacks.some(back => back !== null);
 
     if (placedCount === 0) {
-        alert(is4x6
+        showAlert(is4x6
             ? 'Please place a card in slot 1 before generating PDF.'
-            : 'Please place at least one card on the sheet before generating PDF.');
+            : 'Please place at least one card on the sheet before generating PDF.', 'warning');
         return;
     }
 
     if (mode === 'back' && !hasAnyBacks) {
-        alert('No card backs have been added yet.');
+        showAlert('No card backs have been added yet.', 'warning');
         return;
     }
 
@@ -1068,7 +1088,7 @@ async function generatePDF(mode) {
 
         // Helper: draw cut marks at page edges
         function drawPdfCutMarks() {
-            const markLen = 0.15;
+            const markLen = is4x6 ? 0.35 : 0.15;
             pdf.setDrawColor(0, 0, 0);
             pdf.setLineWidth(0.01);
 
@@ -1176,10 +1196,10 @@ async function generatePDF(mode) {
         pdf.save(`trading-cards${sizeSuffix}${suffix}-${timestamp}.pdf`);
 
         const modeLabel = mode === 'front' ? 'fronts' : mode === 'back' ? 'backs' : 'front + back';
-        alert(`PDF generated (${modeLabel})! ${placedCount} card(s) included.`);
+        showAlert(`PDF generated (${modeLabel})! ${placedCount} card(s) included.`, 'success');
     } catch (error) {
         console.error('Error generating PDF:', error);
-        alert('Error generating PDF. Please try again.');
+        showAlert('Error generating PDF. Please try again.', 'error');
     } finally {
         // Restore button state
         generatePdfBtn.textContent = 'Export ▾';
@@ -1201,14 +1221,14 @@ async function exportPNG(mode) {
         : cardBacks.some(back => back !== null);
 
     if (placedCount === 0) {
-        alert(is4x6
+        showAlert(is4x6
             ? 'Please place a card in slot 1 before exporting.'
-            : 'Please place at least one card on the sheet before exporting.');
+            : 'Please place at least one card on the sheet before exporting.', 'warning');
         return;
     }
 
     if (mode === 'back' && !hasAnyBacks) {
-        alert('No card backs have been added yet.');
+        showAlert('No card backs have been added yet.', 'warning');
         return;
     }
 
@@ -1303,7 +1323,7 @@ async function exportPNG(mode) {
         await Promise.all(promises);
 
         // Draw cut marks at page edges
-        const markLen = 0.15 * DPI;
+        const markLen = (is4x6 ? 0.35 : 0.15) * DPI;
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 2;
 
@@ -1338,10 +1358,10 @@ async function exportPNG(mode) {
 
         const pxW = Math.round(pageW);
         const pxH = Math.round(pageH);
-        alert(`PNG exported (${mode}s) at 300 DPI — ${pxW}×${pxH}px.\nOpen in Photoshop for ${pgW}" × ${pgH}" print-ready layout.`);
+        showAlert(`PNG exported (${mode}s) at 300 DPI — ${pxW}×${pxH}px.\nOpen in Photoshop for ${pgW}" × ${pgH}" print-ready layout.`, 'success');
     } catch (error) {
         console.error('Error exporting PNG:', error);
-        alert('Error exporting PNG. Please try again.');
+        showAlert('Error exporting PNG. Please try again.', 'error');
     } finally {
         generatePdfBtn.textContent = 'Export ▾';
         updateCardCount();
