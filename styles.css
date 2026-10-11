@@ -476,7 +476,7 @@ header h1 .highlight {
     transition: all 0.3s ease;
 }
 
-.paper-size-toggle .size-btn:first-child {
+.paper-size-toggle .size-btn:not(:last-child) {
     border-right: 1px solid #334155;
 }
 
@@ -501,31 +501,18 @@ header h1 .highlight {
     display: none;
 }
 
-/* Card border for 4x6 - single card */
-.print-sheet.size-4x6.show-card-borders::before {
-    /* Single card: 240 + 24 = 264px wide, 336 + 24 = 360px tall */
-    width: 264px;
-    height: 360px;
+/* 4x6 Photo Paper, 2-up - landscape 6" x 4" = 576px x 384px, two cards side by side */
+.print-sheet.size-4x6-2up {
+    width: 576px;
+    height: 384px;
+    grid-template-columns: repeat(2, 240px);
+    grid-template-rows: 336px;
 }
 
-/* Card border when enabled - black background behind grid fills gaps + outer edge */
-.print-sheet.show-card-borders {
-    position: relative;
+.print-sheet.size-4x6-2up .card-slot:not([data-slot="0"]):not([data-slot="1"]) {
+    display: none;
 }
 
-.print-sheet.show-card-borders::before {
-    content: '';
-    position: absolute;
-    /* Grid area: 3*240 + 2*12 = 744px wide, 3*336 + 2*12 = 1032px tall */
-    /* Add 12px (0.125") outer border on all sides */
-    width: 768px;   /* 744 + 24 */
-    height: 1056px; /* 1032 + 24 */
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: #000000;
-    z-index: 0;
-}
 
 /* Sheet Container */
 .sheet-container {
@@ -553,6 +540,7 @@ header h1 .highlight {
     align-content: center;
     padding: 24px;
     position: relative;
+    overflow: hidden;
 }
 
 /* Card Slots - 2.5" x 3.5" at 96 DPI = 240px x 336px */
@@ -566,6 +554,16 @@ header h1 .highlight {
     position: relative;
     background: #f8fafc;
     perspective: 1000px;
+}
+
+/* Border bleed: mirrored card edges extending 6px (0.0625") behind the card.
+   z-index -1 stays inside the slot's stacking context (created by perspective). */
+.card-bleed {
+    position: absolute;
+    inset: -6px;
+    z-index: -1;
+    background-size: 100% 100%;
+    pointer-events: none;
 }
 
 .card-slot.dragover {

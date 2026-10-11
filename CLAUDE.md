@@ -31,7 +31,8 @@ ProCardPrint/
 - `cardBacks` - Array(9) mapping grid positions to back image data URLs (null if no back)
 - `currentSlotForBack` - Tracks which slot is pending a back upload
 - `showCardBorders` - Boolean toggle for black card borders
-- `paperSize` - `'letter'` or `'4x6'` — controls sheet dimensions and slot count
+- `paperSize` - `'letter'`, `'4x6'` (one centered card) or `'4x6-2up'` (two cards, landscape) — controls sheet dimensions and slot count
+- `PAPER_LAYOUTS` / `getLayout()` - single source of page size, cols/rows, cut-mark length, label and filename suffix for each paper size; `mirrorIndex(i, cols)` gives the back-sheet source slot
 
 ### Layout System
 - Front sheet: 3x3 grid, positions 1-9 (left to right, top to bottom)
@@ -44,6 +45,7 @@ ProCardPrint/
 - Card: 2.5" x 3.5" (240px x 336px at 96 DPI)
 - Letter sheet: 8.5" x 11" (816px x 1056px at 96 DPI) — 3x3 grid, 9 cards
 - 4×6 photo sheet: 4" x 6" (384px x 576px at 96 DPI) — single card, centered
+- 4×6 ×2 photo sheet: landscape 6" x 4" (576px x 384px at 96 DPI) — two cards side by side (slots 1-2), mirrored 1↔2 on the back
 - Cutting buffer: 0.125" (12px) gap between cards
 
 ## Design System
@@ -72,12 +74,19 @@ ProCardPrint/
 
 ### Card Border Toggle
 - Checkbox in the layout tabs bar, visible when any card is placed
-- When enabled, draws a solid black rectangle behind the card grid
-- Fills the 0.125" gaps between cards AND adds 0.125" border on outer edges
-- Applied consistently across: preview (CSS `::before` pseudo-element), print preview (`card-grid` background), PDF (`pdf.rect` fill), and PNG (canvas `fillRect`)
+- When enabled, adds a 0.0625" (`BLEED_IN`) bleed around each card: the card's own outer pixels mirrored outward, so the border looks like a continuation of the card (gradients, textures and per-side colors carry through)
+- `cardBleeds` and `cardBackBleeds` (Array(9) of JPEG data URLs) cache the bleed images; populated when a card is placed/back is added, cleared when removed
+- `createBleedImage(src)` — async, draws the card at 320 DPI onto a canvas 20px larger on each side, then mirrors the edge columns and rows outward (rows last, so corners fill too)
+- The bleed image is always drawn first and the original card image on top, so card quality is unchanged
+- Applied consistently across:
+  - Preview: `.card-bleed` div inside the slot (`inset: -6px; z-index: -1`, kept behind the card by the slot's `perspective` stacking context)
+  - Print preview: `card-border-bg` div with the bleed as `background-image`, `inset: -0.0625in`
+  - PDF: `pdf.addImage(bleed)` at card rect expanded by `BLEED_IN`, before the card image
+  - PNG: `drawCard` loads the bleed and the card together and draws the bleed first (so the order holds even with async image loads)
 
 ### Paper Size Toggle
-- Toggle button pair (Letter / 4×6) in the layout tabs bar, next to Card Border toggle
+- Toggle buttons (Letter / 4×6 / 4×6 ×2) in the layout tabs bar, next to Card Border toggle
+- 4×6 ×2: `.size-4x6-2up` shows slots 1-2 only, card count "X of 2"; PDF/print preview pages are 6"×4" landscape, PNG 1800x1200; back slot numbers are set dynamically in `renderSheet` from `mirrorIndex`
 - `paperSize` state drives all dimensions across preview, print preview, PDF, and PNG
 - When 4×6: preview sheet resizes, slots 1-8 hidden via CSS `.size-4x6`, card count shows "X of 1"
 - 4×6 uses centered card positioning in print preview (`top: 50%; transform: translate(-50%, -50%)`)
@@ -87,7 +96,7 @@ ProCardPrint/
 ### Export System
 - **Export dropdown** with two sections: PDF and Photoshop (300 DPI PNG)
 - PDF modes: Front Only, Back Only, Both (Front + Back)
-- PNG modes: Front Only, Back Only
+- PNG modes: Front Only, Back Only, Both (Front + Back)
 - Letter: 2550x3300px at 300 DPI (8.5"x11") | 4×6: 1200x1800px at 300 DPI (4"x6")
 - Both respect the card border toggle and paper size toggle
 - Filenames include size and mode suffix: `trading-cards-4x6-fronts-2026-02-07.pdf`
@@ -99,10 +108,10 @@ ProCardPrint/
 - 4×6: grid centered vertically and horizontally via `translate(-50%, -50%)`
 - Page dimensions, grid columns/rows, and slot count all driven by `paperSize`
 - Guided double-sided print workflow with step-by-step confirm dialogs
-- Card border state carries over to print preview via `has-border` class on `card-grid`
+- Card border state carries over to print preview via per-card `card-border-bg` divs inside `card-with-border` wrappers
 
 ### Cut Marks
-- Small black tick marks (0.15") at all four page edges aligned with card boundaries
+- Small black tick marks (0.5" for letter, 0.35" for 4×6) at all four page edges aligned with card boundaries — 0.5" survives non-borderless printer margins (~0.25") and leaves a clearly visible mark
 - Letter: 6 vertical marks on top/bottom edges, 6 horizontal marks on left/right edges
 - 4×6: 2 vertical marks on top/bottom, 2 horizontal marks on left/right (single card edges)
 - Applied across all outputs: preview (`renderCutMarks` divs), print preview (`generatePreviewCutMarks` HTML), PDF (`drawPdfCutMarks` lines), PNG (canvas strokes)
@@ -124,6 +133,7 @@ ProCardPrint/
   - Converts DPI to pixels/meter (300 DPI = 11811 ppm), builds pHYs chunk with CRC32, inserts after IHDR
 - Border background drawn before cards via `fillRect`
 - Cut marks drawn after cards via canvas strokes
+- "Both" mode loops over `['front', 'back']`, rendering a separate canvas for each and downloading two PNG files
 - Downloads as PNG via data URL and anchor click
 
 ## Common Gotchas

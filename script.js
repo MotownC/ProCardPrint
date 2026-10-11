@@ -2,9 +2,72 @@
 let uploadedCards = [];
 let cardSlots = Array(9).fill(null);
 let cardBacks = Array(9).fill(null); // Store back images for each slot
+let cardBleeds = Array(9).fill(null); // Cached bleed image (data URL) for each front card
+let cardBackBleeds = Array(9).fill(null); // Cached bleed image (data URL) for each back image
 let currentSlotForBack = null; // Track which slot is getting a back
-let showCardBorders = false; // Toggle for thin black card borders
-let paperSize = 'letter'; // 'letter' or '4x6'
+let showCardBorders = false; // Toggle for card borders (color-matched to card edges)
+let paperSize = 'letter'; // 'letter', '4x6' (single centered card) or '4x6-2up' (two cards, landscape)
+
+// Page layouts in inches. 4x6-2up is a landscape 6"x4" page with two cards side by side.
+const PAPER_LAYOUTS = {
+    letter:    { pageW: 8.5, pageH: 11, cols: 3, rows: 3, markLen: 0.5,  label: '8.5" × 11"',     fileSuffix: '' },
+    '4x6':     { pageW: 4,   pageH: 6,  cols: 1, rows: 1, markLen: 0.35, label: '4" × 6"',        fileSuffix: '-4x6' },
+    '4x6-2up': { pageW: 6,   pageH: 4,  cols: 2, rows: 1, markLen: 0.35, label: '6" × 4" (2-up)', fileSuffix: '-4x6-2up' }
+};
+
+function getLayout() {
+    const layout = PAPER_LAYOUTS[paperSize];
+    return { ...layout, slots: layout.cols * layout.rows, isLetter: paperSize === 'letter' };
+}
+
+// Slot index whose card sits at position i on the horizontally mirrored back sheet
+function mirrorIndex(i, cols) {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    return row * cols + (cols - 1 - col);
+}
+
+// Bleed added beyond the card on each side when the border toggle is on (inches)
+const BLEED_IN = 0.0625;
+
+// Build a bleed image: the card drawn at 2.5"x3.5" with its outer pixels mirrored outward
+// by BLEED_IN on every side, so the border reads as a continuation of the card's edge.
+// The result covers (2.5 + 2*BLEED_IN) x (3.5 + 2*BLEED_IN) inches; the card is drawn on top of it.
+function createBleedImage(src) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const DPI = 320; // 0.0625" = 20px exactly
+                const W = 2.5 * DPI, H = 3.5 * DPI, bp = BLEED_IN * DPI;
+                const canvas = document.createElement('canvas');
+                canvas.width = W + bp * 2;
+                canvas.height = H + bp * 2;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, bp, bp, W, H);
+
+                // Mirror the left/right edge columns outward
+                ctx.setTransform(-1, 0, 0, 1, 2 * bp, 0);
+                ctx.drawImage(canvas, bp, bp, bp, H, bp, bp, bp, H);
+                ctx.setTransform(-1, 0, 0, 1, 2 * (bp + W), 0);
+                ctx.drawImage(canvas, W, bp, bp, H, W, bp, bp, H);
+
+                // Mirror the top/bottom edge rows outward (full width, which fills the corners too)
+                ctx.setTransform(1, 0, 0, -1, 0, 2 * bp);
+                ctx.drawImage(canvas, 0, bp, canvas.width, bp, 0, bp, canvas.width, bp);
+                ctx.setTransform(1, 0, 0, -1, 0, 2 * (bp + H));
+                ctx.drawImage(canvas, 0, H, canvas.width, bp, 0, H, canvas.width, bp);
+
+                resolve(canvas.toDataURL('image/jpeg', 0.92));
+            } catch (err) {
+                console.error('createBleedImage failed:', err);
+                resolve(null);
+            }
+        };
+        img.onerror = () => resolve(null);
+        img.src = src;
+    });
+}
 
 // DOM Elements
 const uploadZone = document.getElementById('uploadZone');
@@ -97,8 +160,7 @@ function setupEventListeners() {
     const borderToggle = document.getElementById('cardBorderToggle');
     borderToggle.addEventListener('change', (e) => {
         showCardBorders = e.target.checked;
-        printSheet.classList.toggle('show-card-borders', showCardBorders);
-        backSheet.classList.toggle('show-card-borders', showCardBorders);
+        renderSlots();
     });
 
     // Layout tab events
@@ -114,10 +176,11 @@ function setupEventListeners() {
             sizeButtons.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             paperSize = btn.dataset.size;
-            const is4x6 = paperSize === '4x6';
-            printSheet.classList.toggle('size-4x6', is4x6);
-            backSheet.classList.toggle('size-4x6', is4x6);
-            document.getElementById('sheetSizeLabel').textContent = is4x6 ? '4" × 6"' : '8.5" × 11"';
+            [printSheet, backSheet].forEach(sheet => {
+                sheet.classList.toggle('size-4x6', paperSize === '4x6');
+                sheet.classList.toggle('size-4x6-2up', paperSize === '4x6-2up');
+            });
+            document.getElementById('sheetSizeLabel').textContent = getLayout().label;
             renderSlots();
             updateCardCount();
         });
@@ -300,8 +363,9 @@ function handleSlotDrop(e, slotIndex) {
 }
 
 // Place card in slot
-function placeCardInSlot(card, slotIndex) {
+async function placeCardInSlot(card, slotIndex) {
     cardSlots[slotIndex] = card;
+    cardBleeds[slotIndex] = await createBleedImage(card.src);
     renderSlots();
     updateCardCount();
 
@@ -327,8 +391,9 @@ function handleBackFileSelect(e) {
     if (file && file.type.startsWith('image/')) {
         const reader = new FileReader();
 
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
             cardBacks[currentSlotForBack] = event.target.result;
+            cardBackBleeds[currentSlotForBack] = await createBleedImage(event.target.result);
             renderSlots();
             closeBackModal();
         };
@@ -370,15 +435,15 @@ function renderCutMarks(sheet) {
 
     // Dimensions at 96 DPI
     const cardW = 240, cardH = 336, gap = 12;
-    const is4x6 = paperSize === '4x6';
-    const cols = is4x6 ? 1 : 3, rows = is4x6 ? 1 : 3;
+    const layout = getLayout();
+    const { cols, rows } = layout;
     const gridW = cardW * cols + gap * (cols - 1);
     const gridH = cardH * rows + gap * (rows - 1);
-    const sheetW = is4x6 ? 384 : 816;
-    const sheetH = is4x6 ? 576 : 1056;
+    const sheetW = layout.pageW * 96;
+    const sheetH = layout.pageH * 96;
     const mx = (sheetW - gridW) / 2;
     const my = (sheetH - gridH) / 2;
-    const markLen = is4x6 ? 34 : 14; // 4x6: ~0.35" (clears printer margins), letter: ~0.15"
+    const markLen = Math.round(layout.markLen * 96); // 4x6: ~0.35", letter: ~0.5" (survives non-borderless printer margin)
     const markThick = 1;
 
     // X positions of vertical cuts (left/right edges of each card)
@@ -440,27 +505,21 @@ function renderCutMarks(sheet) {
     });
 }
 
+
 // Render a sheet (front or back)
 function renderSheet(sheetElement, isBackSheet) {
     const slots = sheetElement.querySelectorAll('.card-slot');
 
     slots.forEach((slot, index) => {
         let card, back;
+        let srcIndex = index;
 
         if (isBackSheet) {
-            // For back sheet, mirror the positions (skip for 4x6 single card)
-            if (paperSize === '4x6') {
-                card = cardSlots[index];
-                back = cardBacks[index];
-            } else {
-                const row = Math.floor(index / 3);
-                const col = index % 3;
-                const mirroredCol = 2 - col;
-                const mirroredIndex = row * 3 + mirroredCol;
-
-                card = cardSlots[mirroredIndex];
-                back = cardBacks[mirroredIndex];
-            }
+            // For back sheet, mirror the positions horizontally (hidden slots keep their index)
+            const { cols, slots } = getLayout();
+            if (index < slots) srcIndex = mirrorIndex(index, cols);
+            card = cardSlots[srcIndex];
+            back = cardBacks[srcIndex];
         } else {
             // Front sheet uses normal positions
             card = cardSlots[index];
@@ -471,11 +530,21 @@ function renderSheet(sheetElement, isBackSheet) {
 
         // Clear slot content except slot number
         const slotNumber = slot.querySelector('.slot-number');
+        if (isBackSheet) slotNumber.textContent = srcIndex + 1;
         slot.innerHTML = '';
         slot.appendChild(slotNumber);
 
         if (card) {
             slot.classList.add('filled');
+
+            // Bleed border: the card's mirrored edges extend 6px (0.0625") behind it
+            const bleed = (isBackSheet ? cardBackBleeds : cardBleeds)[srcIndex];
+            if (showCardBorders && bleed) {
+                const bleedDiv = document.createElement('div');
+                bleedDiv.className = 'card-bleed';
+                bleedDiv.style.backgroundImage = `url(${bleed})`;
+                slot.appendChild(bleedDiv);
+            }
 
             // For back sheet, show the back image directly (no flip container needed)
             if (isBackSheet && hasBack) {
@@ -570,8 +639,11 @@ function removeCardFromLibrary(cardId) {
     uploadedCards = uploadedCards.filter(c => c.id !== cardId);
 
     // Also remove from slots if placed
-    cardSlots = cardSlots.map(slot => {
-        if (slot && slot.id === cardId) return null;
+    cardSlots = cardSlots.map((slot, i) => {
+        if (slot && slot.id === cardId) {
+            cardBleeds[i] = null;
+            return null;
+        }
         return slot;
     });
 
@@ -583,7 +655,9 @@ function removeCardFromLibrary(cardId) {
 // Remove card from slot
 function removeCardFromSlot(slotIndex) {
     cardSlots[slotIndex] = null;
-    cardBacks[slotIndex] = null; // Also remove back if present
+    cardBacks[slotIndex] = null;
+    cardBleeds[slotIndex] = null;
+    cardBackBleeds[slotIndex] = null;
     renderSlots();
     updateCardCount();
 }
@@ -594,6 +668,8 @@ function clearAll() {
         uploadedCards = [];
         cardSlots = Array(9).fill(null);
         cardBacks = Array(9).fill(null);
+        cardBleeds = Array(9).fill(null);
+        cardBackBleeds = Array(9).fill(null);
         renderThumbnails();
         renderSlots();
         updateCardCount();
@@ -602,10 +678,8 @@ function clearAll() {
 
 // Update card count
 function updateCardCount() {
-    const maxCards = paperSize === '4x6' ? 1 : 9;
-    const placedCount = paperSize === '4x6'
-        ? (cardSlots[0] !== null ? 1 : 0)
-        : cardSlots.filter(slot => slot !== null).length;
+    const maxCards = getLayout().slots;
+    const placedCount = cardSlots.slice(0, maxCards).filter(slot => slot !== null).length;
     cardCount.textContent = `${placedCount} of ${maxCards} card${maxCards > 1 ? 's' : ''} placed`;
 
     // Enable/disable buttons
@@ -615,15 +689,13 @@ function updateCardCount() {
 
 // Generate cut mark HTML for print preview pages (in inches)
 function generatePreviewCutMarks() {
-    const cardW = 2.5, cardH = 3.5, gap = 0.125;
-    const is4x6 = paperSize === '4x6';
-    const cols = is4x6 ? 1 : 3, rows = is4x6 ? 1 : 3;
-    const pageW = is4x6 ? 4 : 8.5, pageH = is4x6 ? 6 : 11;
+    const cardW = 2.5, cardH = 3.5;
+    const { cols, rows, pageW, pageH, markLen, isLetter } = getLayout();
+    const gap = isLetter ? 0.0625 : 0.125;
     const gridW = cardW * cols + gap * (cols - 1);
     const gridH = cardH * rows + gap * (rows - 1);
     const mx = (pageW - gridW) / 2;
-    const my = (pageH - gridH) / 2;
-    const markLen = is4x6 ? 0.35 : 0.15;
+    const my = isLetter ? 0.25 : (pageH - gridH) / 2;
     let marks = '';
 
     // X positions of vertical cuts
@@ -651,27 +723,24 @@ function generatePreviewCutMarks() {
 
 // Open Print Preview
 function openPrintPreview() {
-    const is4x6 = paperSize === '4x6';
-    const placedCount = is4x6
-        ? (cardSlots[0] !== null ? 1 : 0)
-        : cardSlots.filter(slot => slot !== null).length;
+    const layout = getLayout();
+    const is4x6 = !layout.isLetter;
+    const placedCount = cardSlots.slice(0, layout.slots).filter(slot => slot !== null).length;
 
     if (placedCount === 0) {
         showAlert(is4x6
-            ? 'Please place a card in slot 1 before previewing.'
+            ? 'Please place a card on the 4×6 sheet before previewing.'
             : 'Please place at least one card on the sheet before previewing.', 'warning');
         return;
     }
 
-    const hasAnyBacks = is4x6
-        ? cardBacks[0] !== null
-        : cardBacks.some(back => back !== null);
+    const hasAnyBacks = cardBacks.slice(0, layout.slots).some(back => back !== null);
 
-    const pageW = is4x6 ? '4in' : '8.5in';
-    const pageH = is4x6 ? '6in' : '11in';
-    const gridCols = is4x6 ? 1 : 3;
-    const gridRows = is4x6 ? 1 : 3;
-    const totalSlots = is4x6 ? 1 : 9;
+    const pageW = layout.pageW + 'in';
+    const pageH = layout.pageH + 'in';
+    const gridCols = layout.cols;
+    const gridRows = layout.rows;
+    const totalSlots = layout.slots;
 
     // Create print preview window
     const previewWindow = window.open('', 'Print Preview', 'width=900,height=1100');
@@ -794,22 +863,32 @@ function openPrintPreview() {
 
         .card-grid {
             position: absolute;
-            ${is4x6 ? `top: 50%; left: 50%; transform: translate(-50%, -50%);` : `top: 0.125in; left: 50%; transform: translateX(-50%);`}
+            ${is4x6 ? `top: 50%; left: 50%; transform: translate(-50%, -50%);` : `top: 0.25in; left: 50%; transform: translateX(-50%);`}
             display: grid;
             grid-template-columns: repeat(${gridCols}, 2.5in);
             grid-template-rows: repeat(${gridRows}, 3.5in);
-            gap: 0.125in;
+            gap: ${is4x6 ? '0.125in' : '0.0625in'};
         }
 
         .card {
+            position: relative;
+            z-index: 1;
             width: 2.5in;
             height: 3.5in;
             border: 1px solid #e2e8f0;
         }
 
-        .card-grid.has-border {
-            background: #000000;
-            padding: 0.125in;
+        .card-with-border {
+            position: relative;
+            width: 2.5in;
+            height: 3.5in;
+        }
+
+        .card-border-bg {
+            position: absolute;
+            inset: -0.0625in;
+            z-index: 0;
+            background-size: 100% 100%;
         }
 
         .card img {
@@ -827,6 +906,11 @@ function openPrintPreview() {
             font-size: 1.2rem;
             color: #64748b;
             text-transform: uppercase;
+        }
+
+        @page {
+            size: ${pageW} ${pageH};
+            margin: 0;
         }
 
         @media print {
@@ -866,7 +950,7 @@ function openPrintPreview() {
 </head>
 <body>
     <div class="controls">
-        <h1>Print Preview - ${hasAnyBacks ? '2 Pages' : '1 Page'}${is4x6 ? ' (4×6 Photo)' : ''}</h1>
+        <h1>Print Preview - ${hasAnyBacks ? '2 Pages' : '1 Page'}${is4x6 ? ` (4×6 Photo${layout.slots > 1 ? ', 2 Cards' : ''})` : ''}</h1>
 
         ${hasAnyBacks ? `
         <div class="view-toggle">
@@ -890,16 +974,18 @@ function openPrintPreview() {
     <!-- Page 1: Fronts -->
     <div class="page" id="frontPage">
         <div class="page-label">Page 1 - Card Front${is4x6 ? ' (4×6)' : 's'}</div>
-        <div class="card-grid${showCardBorders ? ' has-border' : ''}">
+        <div class="card-grid">
 `;
 
     // Add front cards
     for (let i = 0; i < totalSlots; i++) {
         const card = cardSlots[i];
         if (card) {
-            html += `<div class="card"><img src="${card.src}" alt="Card ${i + 1}"></div>`;
+            const bleed = cardBleeds[i];
+            const borderHtml = showCardBorders && bleed ? `<div class="card-border-bg" style="background-image:url(${bleed})"></div>` : '';
+            html += `<div class="card-with-border">${borderHtml}<div class="card"><img src="${card.src}" alt="Card ${i + 1}"></div></div>`;
         } else {
-            html += `<div class="card"></div>`;
+            html += `<div class="card-with-border"><div class="card"></div></div>`;
         }
     }
 
@@ -915,31 +1001,20 @@ function openPrintPreview() {
     <!-- Page 2: Backs (Mirrored) -->
     <div class="page" id="backPage">
         <div class="page-label">Page 2 - Card Back${is4x6 ? ' (4×6)' : 's (Mirrored for Double-Sided)'}</div>
-        <div class="card-grid${showCardBorders ? ' has-border' : ''}">
+        <div class="card-grid">
 `;
 
-        if (is4x6) {
-            // Single card back — no mirroring needed
-            const back = cardBacks[0];
-            if (back) {
-                html += `<div class="card"><img src="${back}" alt="Card 1 back"></div>`;
-            } else {
-                html += `<div class="card"></div>`;
-            }
-        } else {
-            // Add back cards (mirrored)
-            for (let i = 0; i < 9; i++) {
-                const row = Math.floor(i / 3);
-                const col = i % 3;
-                const mirroredCol = 2 - col;
-                const mirroredIndex = row * 3 + mirroredCol;
+        // Add back cards (mirrored; a single 4x6 card mirrors onto itself)
+        for (let i = 0; i < totalSlots; i++) {
+            const mirroredIndex = mirrorIndex(i, gridCols);
 
-                const back = cardBacks[mirroredIndex];
-                if (back) {
-                    html += `<div class="card"><img src="${back}" alt="Card ${mirroredIndex + 1} back"></div>`;
-                } else {
-                    html += `<div class="card"></div>`;
-                }
+            const back = cardBacks[mirroredIndex];
+            if (back) {
+                const bleed = cardBackBleeds[mirroredIndex];
+                const borderHtml = showCardBorders && bleed ? `<div class="card-border-bg" style="background-image:url(${bleed})"></div>` : '';
+                html += `<div class="card-with-border">${borderHtml}<div class="card"><img src="${back}" alt="Card ${mirroredIndex + 1} back"></div></div>`;
+            } else {
+                html += `<div class="card-with-border"><div class="card"></div></div>`;
             }
         }
 
@@ -1031,17 +1106,14 @@ async function generatePDF(mode) {
     // Close dropdown
     document.getElementById('pdfDropdownMenu').classList.remove('open');
 
-    const is4x6 = paperSize === '4x6';
-    const placedCount = is4x6
-        ? (cardSlots[0] !== null ? 1 : 0)
-        : cardSlots.filter(slot => slot !== null).length;
-    const hasAnyBacks = is4x6
-        ? cardBacks[0] !== null
-        : cardBacks.some(back => back !== null);
+    const layout = getLayout();
+    const is4x6 = !layout.isLetter;
+    const placedCount = cardSlots.slice(0, layout.slots).filter(slot => slot !== null).length;
+    const hasAnyBacks = cardBacks.slice(0, layout.slots).some(back => back !== null);
 
     if (placedCount === 0) {
         showAlert(is4x6
-            ? 'Please place a card in slot 1 before generating PDF.'
+            ? 'Please place a card on the 4×6 sheet before generating PDF.'
             : 'Please place at least one card on the sheet before generating PDF.', 'warning');
         return;
     }
@@ -1059,16 +1131,15 @@ async function generatePDF(mode) {
     try {
         const { jsPDF } = window.jspdf;
 
-        const pageW = is4x6 ? 4 : 8.5;
-        const pageH = is4x6 ? 6 : 11;
-        const cols = is4x6 ? 1 : 3;
-        const rows = is4x6 ? 1 : 3;
+        const { pageW, pageH, cols, rows } = layout;
+        const orientation = pageW > pageH ? 'landscape' : 'portrait';
+        const pageFormat = is4x6 ? [pageW, pageH] : 'letter';
 
         // Create PDF
         const pdf = new jsPDF({
-            orientation: 'portrait',
+            orientation,
             unit: 'in',
-            format: is4x6 ? [4, 6] : 'letter'
+            format: pageFormat
         });
 
         // Card dimensions in inches
@@ -1088,7 +1159,7 @@ async function generatePDF(mode) {
 
         // Helper: draw cut marks at page edges
         function drawPdfCutMarks() {
-            const markLen = is4x6 ? 0.35 : 0.15;
+            const markLen = layout.markLen;
             pdf.setDrawColor(0, 0, 0);
             pdf.setLineWidth(0.01);
 
@@ -1113,29 +1184,19 @@ async function generatePDF(mode) {
             }
         }
 
-        // Helper: draw black border background behind card grid
-        function drawBorderBackground() {
-            if (showCardBorders) {
-                pdf.setFillColor(0, 0, 0);
-                pdf.rect(
-                    marginX - spacing, marginY - spacing,
-                    totalWidth + spacing * 2, totalHeight + spacing * 2, 'F'
-                );
-            }
-        }
-
         // Card fronts
         if (mode === 'front' || mode === 'both') {
-            drawBorderBackground();
-            const slotCount = is4x6 ? 1 : cardSlots.length;
-            for (let i = 0; i < slotCount; i++) {
+            for (let i = 0; i < layout.slots; i++) {
                 const card = cardSlots[i];
                 if (card) {
                     const row = Math.floor(i / cols);
                     const col = i % cols;
-
                     const x = marginX + (col * (cardWidth + spacing));
                     const y = marginY + (row * (cardHeight + spacing));
+
+                    if (showCardBorders && cardBleeds[i]) {
+                        pdf.addImage(cardBleeds[i], 'JPEG', x - BLEED_IN, y - BLEED_IN, cardWidth + BLEED_IN * 2, cardHeight + BLEED_IN * 2);
+                    }
 
                     try {
                         pdf.addImage(card.src, 'JPEG', x, y, cardWidth, cardHeight);
@@ -1151,38 +1212,29 @@ async function generatePDF(mode) {
         // Card backs (mirrored horizontally for double-sided printing)
         if ((mode === 'back' || mode === 'both') && hasAnyBacks) {
             if (needsNewPage) {
-                pdf.addPage(is4x6 ? [4, 6] : 'letter', 'portrait');
+                pdf.addPage(pageFormat, orientation);
             }
-            drawBorderBackground();
 
-            if (is4x6) {
-                // Single card back — centered, no mirroring needed
-                const back = cardBacks[0];
+            for (let i = 0; i < layout.slots; i++) {
+                const back = cardBacks[i];
                 if (back) {
-                    try {
-                        pdf.addImage(back, 'JPEG', marginX, marginY, cardWidth, cardHeight);
-                    } catch (error) {
-                        console.error('Error adding back for card 0:', error);
+                    const row = Math.floor(i / cols);
+                    const col = i % cols;
+
+                    // Mirror the column (letter: 0->2, 1->1, 2->0; 2-up: 0<->1; single: 0->0)
+                    const mirroredCol = cols - 1 - col;
+
+                    const x = marginX + (mirroredCol * (cardWidth + spacing));
+                    const y = marginY + (row * (cardHeight + spacing));
+
+                    if (showCardBorders && cardBackBleeds[i]) {
+                        pdf.addImage(cardBackBleeds[i], 'JPEG', x - BLEED_IN, y - BLEED_IN, cardWidth + BLEED_IN * 2, cardHeight + BLEED_IN * 2);
                     }
-                }
-            } else {
-                for (let i = 0; i < cardBacks.length; i++) {
-                    const back = cardBacks[i];
-                    if (back) {
-                        const row = Math.floor(i / 3);
-                        const col = i % 3;
 
-                        // Mirror the column: 0->2, 1->1, 2->0
-                        const mirroredCol = 2 - col;
-
-                        const x = marginX + (mirroredCol * (cardWidth + spacing));
-                        const y = marginY + (row * (cardHeight + spacing));
-
-                        try {
-                            pdf.addImage(back, 'JPEG', x, y, cardWidth, cardHeight);
-                        } catch (error) {
-                            console.error(`Error adding back for card ${i}:`, error);
-                        }
+                    try {
+                        pdf.addImage(back, 'JPEG', x, y, cardWidth, cardHeight);
+                    } catch (error) {
+                        console.error(`Error adding back for card ${i}:`, error);
                     }
                 }
             }
@@ -1191,7 +1243,7 @@ async function generatePDF(mode) {
 
         // Save PDF with descriptive filename
         const timestamp = new Date().toISOString().slice(0, 10);
-        const sizeSuffix = is4x6 ? '-4x6' : '';
+        const sizeSuffix = layout.fileSuffix;
         const suffix = mode === 'front' ? '-fronts' : mode === 'back' ? '-backs' : '';
         pdf.save(`trading-cards${sizeSuffix}${suffix}-${timestamp}.pdf`);
 
@@ -1212,22 +1264,19 @@ async function exportPNG(mode) {
     // Close dropdown
     document.getElementById('pdfDropdownMenu').classList.remove('open');
 
-    const is4x6 = paperSize === '4x6';
-    const placedCount = is4x6
-        ? (cardSlots[0] !== null ? 1 : 0)
-        : cardSlots.filter(slot => slot !== null).length;
-    const hasAnyBacks = is4x6
-        ? cardBacks[0] !== null
-        : cardBacks.some(back => back !== null);
+    const layout = getLayout();
+    const is4x6 = !layout.isLetter;
+    const placedCount = cardSlots.slice(0, layout.slots).filter(slot => slot !== null).length;
+    const hasAnyBacks = cardBacks.slice(0, layout.slots).some(back => back !== null);
 
     if (placedCount === 0) {
         showAlert(is4x6
-            ? 'Please place a card in slot 1 before exporting.'
+            ? 'Please place a card on the 4×6 sheet before exporting.'
             : 'Please place at least one card on the sheet before exporting.', 'warning');
         return;
     }
 
-    if (mode === 'back' && !hasAnyBacks) {
+    if ((mode === 'back' || mode === 'both') && !hasAnyBacks) {
         showAlert('No card backs have been added yet.', 'warning');
         return;
     }
@@ -1239,10 +1288,7 @@ async function exportPNG(mode) {
 
     try {
         const DPI = 300;
-        const pgW = is4x6 ? 4 : 8.5;
-        const pgH = is4x6 ? 6 : 11;
-        const cols = is4x6 ? 1 : 3;
-        const rowCount = is4x6 ? 1 : 3;
+        const { pageW: pgW, pageH: pgH, cols, rows: rowCount } = layout;
 
         const pageW = pgW * DPI;
         const pageH = pgH * DPI;
@@ -1256,109 +1302,100 @@ async function exportPNG(mode) {
         const offsetX = (pageW - totalW) / 2;
         const offsetY = (pageH - totalH) / 2;
 
-        const canvas = document.createElement('canvas');
-        canvas.width = pageW;
-        canvas.height = pageH;
-        const ctx = canvas.getContext('2d');
+        const modes = mode === 'both' ? ['front', 'back'] : [mode];
+        const timestamp = new Date().toISOString().slice(0, 10);
+        const sizeSuffix = layout.fileSuffix;
 
-        // White background
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, pageW, pageH);
+        for (const currentMode of modes) {
+            const canvas = document.createElement('canvas');
+            canvas.width = pageW;
+            canvas.height = pageH;
+            const ctx = canvas.getContext('2d');
 
-        // Draw black border background behind card grid
-        if (showCardBorders) {
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(
-                offsetX - gap, offsetY - gap,
-                totalW + gap * 2, totalH + gap * 2
-            );
-        }
+            // White background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, pageW, pageH);
 
-        // Load and draw card images
-        const drawCard = (src, col, row) => {
-            return new Promise((resolve) => {
+            // Load and draw card images
+            const loadImage = (src) => new Promise((resolve) => {
                 const img = new Image();
-                img.onload = () => {
-                    const x = offsetX + (col * (cardW + gap));
-                    const y = offsetY + (row * (cardH + gap));
-                    ctx.drawImage(img, x, y, cardW, cardH);
-                    resolve();
-                };
-                img.onerror = () => resolve();
+                img.onload = () => resolve(img);
+                img.onerror = () => resolve(null);
                 img.src = src;
             });
-        };
 
-        const promises = [];
+            // Draws the bleed (if any) first so the card always sits on top of it
+            const drawCard = async (src, col, row, bleedSrc) => {
+                const [img, bleedImg] = await Promise.all([loadImage(src), bleedSrc ? loadImage(bleedSrc) : null]);
+                const x = offsetX + (col * (cardW + gap));
+                const y = offsetY + (row * (cardH + gap));
+                const bp = BLEED_IN * DPI;
+                if (bleedImg) ctx.drawImage(bleedImg, x - bp, y - bp, cardW + bp * 2, cardH + bp * 2);
+                if (img) ctx.drawImage(img, x, y, cardW, cardH);
+            };
 
-        if (mode === 'front') {
-            const slotCount = is4x6 ? 1 : cardSlots.length;
-            for (let i = 0; i < slotCount; i++) {
-                const card = cardSlots[i];
-                if (card) {
-                    const row = Math.floor(i / cols);
-                    const col = i % cols;
-                    promises.push(drawCard(card.src, col, row));
+            const promises = [];
+
+            if (currentMode === 'front') {
+                for (let i = 0; i < layout.slots; i++) {
+                    const card = cardSlots[i];
+                    if (card) {
+                        const row = Math.floor(i / cols);
+                        const col = i % cols;
+                        promises.push(drawCard(card.src, col, row, showCardBorders ? cardBleeds[i] : null));
+                    }
                 }
-            }
-        } else if (mode === 'back') {
-            if (is4x6) {
-                const back = cardBacks[0];
-                if (back) {
-                    promises.push(drawCard(back, 0, 0));
-                }
-            } else {
-                for (let i = 0; i < cardBacks.length; i++) {
+            } else if (currentMode === 'back') {
+                for (let i = 0; i < layout.slots; i++) {
                     const back = cardBacks[i];
                     if (back) {
-                        const row = Math.floor(i / 3);
-                        const col = i % 3;
-                        const mirroredCol = 2 - col;
-                        promises.push(drawCard(back, mirroredCol, row));
+                        const row = Math.floor(i / cols);
+                        const col = i % cols;
+                        const mirroredCol = cols - 1 - col;
+                        promises.push(drawCard(back, mirroredCol, row, showCardBorders ? cardBackBleeds[i] : null));
                     }
                 }
             }
+
+            await Promise.all(promises);
+
+            // Draw cut marks at page edges
+            const markLen = layout.markLen * DPI;
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+
+            for (let c = 0; c < cols; c++) {
+                const left = offsetX + c * (cardW + gap);
+                const right = left + cardW;
+                [left, right].forEach(x => {
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, markLen); ctx.stroke();             // top
+                    ctx.beginPath(); ctx.moveTo(x, pageH - markLen); ctx.lineTo(x, pageH); ctx.stroke();  // bottom
+                });
+            }
+
+            for (let r = 0; r < rowCount; r++) {
+                const top = offsetY + r * (cardH + gap);
+                const bottom = top + cardH;
+                [top, bottom].forEach(y => {
+                    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(markLen, y); ctx.stroke();               // left
+                    ctx.beginPath(); ctx.moveTo(pageW - markLen, y); ctx.lineTo(pageW, y); ctx.stroke();   // right
+                });
+            }
+
+            // Download as PNG with 300 DPI metadata
+            const suffix = currentMode === 'front' ? '-fronts' : '-backs';
+            const pngDataUrl = canvas.toDataURL('image/png');
+            const pngWithDpi = setPngDpi(pngDataUrl, 300);
+            const link = document.createElement('a');
+            link.download = `trading-cards${sizeSuffix}${suffix}-300dpi-${timestamp}.png`;
+            link.href = pngWithDpi;
+            link.click();
         }
-
-        await Promise.all(promises);
-
-        // Draw cut marks at page edges
-        const markLen = (is4x6 ? 0.35 : 0.15) * DPI;
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 2;
-
-        for (let col = 0; col < cols; col++) {
-            const left = offsetX + col * (cardW + gap);
-            const right = left + cardW;
-            [left, right].forEach(x => {
-                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, markLen); ctx.stroke();             // top
-                ctx.beginPath(); ctx.moveTo(x, pageH - markLen); ctx.lineTo(x, pageH); ctx.stroke();  // bottom
-            });
-        }
-
-        for (let row = 0; row < rowCount; row++) {
-            const top = offsetY + row * (cardH + gap);
-            const bottom = top + cardH;
-            [top, bottom].forEach(y => {
-                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(markLen, y); ctx.stroke();               // left
-                ctx.beginPath(); ctx.moveTo(pageW - markLen, y); ctx.lineTo(pageW, y); ctx.stroke();   // right
-            });
-        }
-
-        // Download as PNG with 300 DPI metadata
-        const timestamp = new Date().toISOString().slice(0, 10);
-        const sizeSuffix = is4x6 ? '-4x6' : '';
-        const suffix = mode === 'front' ? '-fronts' : '-backs';
-        const pngDataUrl = canvas.toDataURL('image/png');
-        const pngWithDpi = setPngDpi(pngDataUrl, 300);
-        const link = document.createElement('a');
-        link.download = `trading-cards${sizeSuffix}${suffix}-300dpi-${timestamp}.png`;
-        link.href = pngWithDpi;
-        link.click();
 
         const pxW = Math.round(pageW);
         const pxH = Math.round(pageH);
-        showAlert(`PNG exported (${mode}s) at 300 DPI — ${pxW}×${pxH}px.\nOpen in Photoshop for ${pgW}" × ${pgH}" print-ready layout.`, 'success');
+        const modeLabel = mode === 'both' ? 'front + back' : `${mode}s`;
+        showAlert(`PNG exported (${modeLabel}) at 300 DPI — ${pxW}×${pxH}px.\nOpen in Photoshop for ${pgW}" × ${pgH}" print-ready layout.`, 'success');
     } catch (error) {
         console.error('Error exporting PNG:', error);
         showAlert('Error exporting PNG. Please try again.', 'error');
