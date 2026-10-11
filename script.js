@@ -5,19 +5,22 @@ let cardBacks = Array(9).fill(null); // Store back images for each slot
 let cardBleeds = Array(9).fill(null); // Cached bleed image (data URL) for each front card
 let cardBackBleeds = Array(9).fill(null); // Cached bleed image (data URL) for each back image
 let currentSlotForBack = null; // Track which slot is getting a back
+let flippedSlots = new Set(); // Front-sheet slots currently flipped to show their back (survives re-renders)
 let showCardBorders = false; // Toggle for card borders (color-matched to card edges)
 let paperSize = 'letter'; // 'letter', '4x6' (single centered card) or '4x6-2up' (two cards, landscape)
 
 // Page layouts in inches. 4x6-2up is a landscape 6"x4" page with two cards side by side.
+// markLenTB (optional) shortens the top/bottom cut ticks; 4x6-2up cards sit only 0.25" from
+// the top/bottom edges (0.1875" with border bleed), so 0.15" ticks stay clear of the picture.
 const PAPER_LAYOUTS = {
     letter:    { pageW: 8.5, pageH: 11, cols: 3, rows: 3, markLen: 0.5,  label: '8.5" × 11"',     fileSuffix: '' },
     '4x6':     { pageW: 4,   pageH: 6,  cols: 1, rows: 1, markLen: 0.35, label: '4" × 6"',        fileSuffix: '-4x6' },
-    '4x6-2up': { pageW: 6,   pageH: 4,  cols: 2, rows: 1, markLen: 0.35, label: '6" × 4" (2-up)', fileSuffix: '-4x6-2up' }
+    '4x6-2up': { pageW: 6,   pageH: 4,  cols: 2, rows: 1, markLen: 0.35, markLenTB: 0.15, label: '6" × 4" (2-up)', fileSuffix: '-4x6-2up' }
 };
 
 function getLayout() {
     const layout = PAPER_LAYOUTS[paperSize];
-    return { ...layout, slots: layout.cols * layout.rows, isLetter: paperSize === 'letter' };
+    return { ...layout, markLenTB: layout.markLenTB ?? layout.markLen, slots: layout.cols * layout.rows, isLetter: paperSize === 'letter' };
 }
 
 // Slot index whose card sits at position i on the horizontally mirrored back sheet
@@ -67,6 +70,56 @@ function createBleedImage(src) {
         img.onerror = () => resolve(null);
         img.src = src;
     });
+}
+
+// Rotate an image 90° clockwise; returns a lossless PNG data URL
+function rotateImage90(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalHeight;
+            canvas.height = img.naturalWidth;
+            const ctx = canvas.getContext('2d');
+            ctx.translate(canvas.width, 0);
+            ctx.rotate(Math.PI / 2);
+            ctx.drawImage(img, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+// Rotate a placed card's front (or its back) 90° clockwise; only this slot is affected
+async function rotateSlotImage(slotIndex, isBack) {
+    try {
+        if (isBack) {
+            cardBacks[slotIndex] = await rotateImage90(cardBacks[slotIndex]);
+            cardBackBleeds[slotIndex] = await createBleedImage(cardBacks[slotIndex]);
+        } else {
+            const card = cardSlots[slotIndex];
+            cardSlots[slotIndex] = { ...card, src: await rotateImage90(card.src) };
+            cardBleeds[slotIndex] = await createBleedImage(cardSlots[slotIndex].src);
+        }
+        renderSlots();
+    } catch (err) {
+        console.error('Rotate failed:', err);
+        showAlert('Could not rotate this image.', 'error');
+    }
+}
+
+// isBack: true/false for a fixed side, or null to rotate whichever side is showing (front sheet flip)
+function createRotateButton(slotIndex, isBack) {
+    const rotateBtn = document.createElement('button');
+    rotateBtn.className = 'rotate-card';
+    rotateBtn.innerHTML = '↻';
+    rotateBtn.title = isBack === null ? 'Rotate the side showing 90°' : isBack ? 'Rotate back 90°' : 'Rotate card 90°';
+    rotateBtn.onclick = (e) => {
+        e.stopPropagation();
+        rotateSlotImage(slotIndex, isBack ?? flippedSlots.has(slotIndex));
+    };
+    return rotateBtn;
 }
 
 // DOM Elements
@@ -365,6 +418,7 @@ function handleSlotDrop(e, slotIndex) {
 // Place card in slot
 async function placeCardInSlot(card, slotIndex) {
     cardSlots[slotIndex] = card;
+    flippedSlots.delete(slotIndex);
     cardBleeds[slotIndex] = await createBleedImage(card.src);
     renderSlots();
     updateCardCount();
@@ -444,6 +498,7 @@ function renderCutMarks(sheet) {
     const mx = (sheetW - gridW) / 2;
     const my = (sheetH - gridH) / 2;
     const markLen = Math.round(layout.markLen * 96); // 4x6: ~0.35", letter: ~0.5" (survives non-borderless printer margin)
+    const markLenTB = Math.round(layout.markLenTB * 96);
     const markThick = 1;
 
     // X positions of vertical cuts (left/right edges of each card)
@@ -469,7 +524,7 @@ function renderCutMarks(sheet) {
         topMark.className = 'cut-mark';
         Object.assign(topMark.style, {
             position: 'absolute', left: x + 'px', top: '0px',
-            width: markThick + 'px', height: markLen + 'px', background: '#000'
+            width: markThick + 'px', height: markLenTB + 'px', background: '#000'
         });
         sheet.appendChild(topMark);
 
@@ -478,7 +533,7 @@ function renderCutMarks(sheet) {
         botMark.className = 'cut-mark';
         Object.assign(botMark.style, {
             position: 'absolute', left: x + 'px', bottom: '0px',
-            width: markThick + 'px', height: markLen + 'px', background: '#000'
+            width: markThick + 'px', height: markLenTB + 'px', background: '#000'
         });
         sheet.appendChild(botMark);
     });
@@ -555,12 +610,16 @@ function renderSheet(sheetElement, isBackSheet) {
                 img.style.height = '100%';
                 img.style.objectFit = 'cover';
                 slot.appendChild(img);
+                slot.appendChild(createRotateButton(srcIndex, true));
             } else if (!isBackSheet) {
                 // Front sheet: create flip container
                 const flipContainer = document.createElement('div');
                 flipContainer.className = 'card-flip-container';
                 if (!hasBack) {
                     flipContainer.classList.add('no-back');
+                    flippedSlots.delete(index);
+                } else if (flippedSlots.has(index)) {
+                    flipContainer.classList.add('flipped');
                 }
 
                 // Front face
@@ -593,7 +652,8 @@ function renderSheet(sheetElement, isBackSheet) {
                         if (e.target.closest('.remove-card')) {
                             return;
                         }
-                        flipContainer.classList.toggle('flipped');
+                        const isFlipped = flipContainer.classList.toggle('flipped');
+                        if (isFlipped) flippedSlots.add(index); else flippedSlots.delete(index);
                     });
                 } else {
                     // No back yet - add a button to upload back
@@ -619,6 +679,7 @@ function renderSheet(sheetElement, isBackSheet) {
                     removeCardFromSlot(index);
                 };
                 slot.appendChild(removeBtn);
+                slot.appendChild(createRotateButton(index, null));
 
                 // Show indicator if card has a back
                 if (hasBack) {
@@ -658,6 +719,7 @@ function removeCardFromSlot(slotIndex) {
     cardBacks[slotIndex] = null;
     cardBleeds[slotIndex] = null;
     cardBackBleeds[slotIndex] = null;
+    flippedSlots.delete(slotIndex);
     renderSlots();
     updateCardCount();
 }
@@ -670,6 +732,7 @@ function clearAll() {
         cardBacks = Array(9).fill(null);
         cardBleeds = Array(9).fill(null);
         cardBackBleeds = Array(9).fill(null);
+        flippedSlots.clear();
         renderThumbnails();
         renderSlots();
         updateCardCount();
@@ -690,7 +753,7 @@ function updateCardCount() {
 // Generate cut mark HTML for print preview pages (in inches)
 function generatePreviewCutMarks() {
     const cardW = 2.5, cardH = 3.5;
-    const { cols, rows, pageW, pageH, markLen, isLetter } = getLayout();
+    const { cols, rows, pageW, pageH, markLen, markLenTB, isLetter } = getLayout();
     const gap = isLetter ? 0.0625 : 0.125;
     const gridW = cardW * cols + gap * (cols - 1);
     const gridH = cardH * rows + gap * (rows - 1);
@@ -703,8 +766,8 @@ function generatePreviewCutMarks() {
         const left = mx + col * (cardW + gap);
         const right = left + cardW;
         [left, right].forEach(x => {
-            marks += `<div class="cut-mark" style="left:${x}in;top:0;width:1px;height:${markLen}in;"></div>`;
-            marks += `<div class="cut-mark" style="left:${x}in;bottom:0;width:1px;height:${markLen}in;"></div>`;
+            marks += `<div class="cut-mark" style="left:${x}in;top:0;width:1px;height:${markLenTB}in;"></div>`;
+            marks += `<div class="cut-mark" style="left:${x}in;bottom:0;width:1px;height:${markLenTB}in;"></div>`;
         });
     }
 
@@ -1159,7 +1222,7 @@ async function generatePDF(mode) {
 
         // Helper: draw cut marks at page edges
         function drawPdfCutMarks() {
-            const markLen = layout.markLen;
+            const { markLen, markLenTB } = layout;
             pdf.setDrawColor(0, 0, 0);
             pdf.setLineWidth(0.01);
 
@@ -1168,8 +1231,8 @@ async function generatePDF(mode) {
                 const left = marginX + col * (cardWidth + spacing);
                 const right = left + cardWidth;
                 [left, right].forEach(x => {
-                    pdf.line(x, 0, x, markLen);                 // top
-                    pdf.line(x, pageH - markLen, x, pageH);     // bottom
+                    pdf.line(x, 0, x, markLenTB);               // top
+                    pdf.line(x, pageH - markLenTB, x, pageH);   // bottom
                 });
             }
 
@@ -1361,6 +1424,7 @@ async function exportPNG(mode) {
 
             // Draw cut marks at page edges
             const markLen = layout.markLen * DPI;
+            const markLenTB = layout.markLenTB * DPI;
             ctx.strokeStyle = '#000000';
             ctx.lineWidth = 2;
 
@@ -1368,8 +1432,8 @@ async function exportPNG(mode) {
                 const left = offsetX + c * (cardW + gap);
                 const right = left + cardW;
                 [left, right].forEach(x => {
-                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, markLen); ctx.stroke();             // top
-                    ctx.beginPath(); ctx.moveTo(x, pageH - markLen); ctx.lineTo(x, pageH); ctx.stroke();  // bottom
+                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, markLenTB); ctx.stroke();             // top
+                    ctx.beginPath(); ctx.moveTo(x, pageH - markLenTB); ctx.lineTo(x, pageH); ctx.stroke();  // bottom
                 });
             }
 

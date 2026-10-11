@@ -72,6 +72,12 @@ ProCardPrint/
 - Cards without backs show: "+ Add Back" cyan button on hover
 - Layout tabs appear when any card is placed; Back Layout tab appears only when backs exist
 
+### Rotate
+- Blue ↻ button on hover (left of the × on the front sheet; top-right on the back sheet) rotates that slot's front or back 90° clockwise
+- On the front sheet the ↻ rotates whichever face is showing: the back when the card is flipped (`flippedSlots` Set tracks flip state so it survives `renderSlots()` rebuilds)
+- `rotateImage90(src)` bakes the rotation into a new lossless PNG data URL, so preview, print preview, PDF and PNG need no rotation logic
+- Front rotation replaces `cardSlots[i]` with a copy (`{...card, src}`), so the library thumbnail and other slots using the same upload are unaffected; the slot's bleed is regenerated after rotating
+
 ### Card Border Toggle
 - Checkbox in the layout tabs bar, visible when any card is placed
 - When enabled, adds a 0.0625" (`BLEED_IN`) bleed around each card: the card's own outer pixels mirrored outward, so the border looks like a continuation of the card (gradients, textures and per-side colors carry through)
@@ -114,6 +120,7 @@ ProCardPrint/
 - Small black tick marks (0.5" for letter, 0.35" for 4×6) at all four page edges aligned with card boundaries — 0.5" survives non-borderless printer margins (~0.25") and leaves a clearly visible mark
 - Letter: 6 vertical marks on top/bottom edges, 6 horizontal marks on left/right edges
 - 4×6: 2 vertical marks on top/bottom, 2 horizontal marks on left/right (single card edges)
+- 4×6 ×2: 4 vertical marks on top/bottom shortened to 0.15" (`markLenTB`) so they stop before the card/bleed (cards are 0.25" from those edges); left/right marks stay 0.35"
 - Applied across all outputs: preview (`renderCutMarks` divs), print preview (`generatePreviewCutMarks` HTML), PDF (`drawPdfCutMarks` lines), PNG (canvas strokes)
 - All cut mark functions use `cols`/`rows` variables derived from `paperSize`
 - Always visible (not tied to border toggle) - guides for cutting cards to size
