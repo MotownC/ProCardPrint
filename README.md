@@ -100,31 +100,51 @@ There is no build process. The application runs directly from the source files.
 
 ### Canon Pro-200s Printer Setup
 
-This app is optimized for the Canon Pro-200s inkjet photo printer:
+This app is optimized for the Canon Pro-200s inkjet photo printer. Whether you print from the browser, the PDF, or Photoshop, use these settings for **both** sides:
 
-1. Open the print preview or generated PDF
-2. Select **Canon PRO-200 series** as the destination
-3. Paper size: **Letter (8.5" x 11")**
-4. Scaling: **Actual Size / 100%** (do not fit to page)
-5. Color: **Color**
-6. Paper type: Use high-quality photo paper for best results
-7. Color management: **Printer Manages Colors**
+1. Printer: **Canon PRO-200 series**
+2. Paper size: **Letter** or **4×6** (match the paper size picked in the app)
+3. Scaling: **Actual Size / 100%** (never "fit to page")
+4. **Borderless: off** (borderless enlarges the image slightly, which throws off front/back alignment)
+5. Paper type: match your paper
+6. Color management: **Printer Manages Colors**
+
+### Printing from Photoshop (PNG export)
+
+The PNG export is 300 DPI and opens at the exact page size (8.5"×11", 4"×6", or 6"×4" for 4×6 ×2). In Photoshop's Print dialog (Ctrl+P):
+
+- **Print Settings…**: paper size Letter or 4×6, borderless off, paper type to match
+- **Layout**: Portrait for Letter and 4×6, **Landscape for 4×6 ×2**
+- **Color Management**: Printer Manages Colors
+- **Position and Size**: Center Image on, **Scale 100%**, **Scale to Fit Media off**
+- **Printing Marks / Functions**: leave **Emulsion Down** and **Negative** off (the backs PNG is already mirrored; don't flip it again)
+- On Letter, Photoshop may warn that the image is larger than the printable area. Click **Proceed**; only the outer margin and the tips of the cut marks are clipped.
+
+Print the `-fronts` PNG, reload the sheet (below), then print the `-backs` PNG with identical settings.
 
 ### Double-Sided Printing
 
-The back layout is automatically **mirrored horizontally** so that when you flip the printed sheet, each card back aligns with its front. The guided workflow walks you through:
+The Pro-200s has no automatic duplex, so the sheet is flipped by hand. The back layout is mirrored left-to-right on the page so each back lands behind its front, **if** the sheet is turned over the right way:
 
-1. Print the front side
-2. Remove the sheet from the output tray
-3. Flip it over (like turning a page in a book)
-4. Place it back in the input tray
-5. Print the back side
+| Layout | How to turn the sheet over | Load for the backs |
+|---|---|---|
+| **Letter** (3×3) | Side to side, like a book page | Printed side **down**, the **same edge** goes in first |
+| **4×6** (single card) | Side to side, like a book page | Printed side **down**, the **same edge** goes in first |
+| **4×6 ×2** (landscape) | **End over end** | Printed side **down**, the edge that came out **last** goes in **first** |
+
+4×6 ×2 is different because the printer feeds 4×6 paper short edge first and rotates the landscape page, so the page's left-to-right direction runs along the feed direction.
+
+The guided workflow in Print Preview and the PNG export message show the right steps for the selected layout.
+
+**Test on plain paper first:** print the fronts, pencil a small arrow on the blank side pointing at the edge you're about to feed in, print the backs, then hold the sheet up to a light. Each back should sit directly behind its front. If the backs land in swapped positions, use the other flip. Expect about 1/32"–1/16" of drift, which is normal for manual duplex; the optional card border bleed helps hide it.
 
 ### Card Dimensions
 
 - **Card size**: 2.5" x 3.5" (standard trading card)
-- **Sheet size**: 8.5" x 11" (US Letter)
-- **Grid**: 3 columns x 3 rows (9 cards per sheet)
+- **Sheet sizes**:
+  - Letter 8.5" x 11": 3 x 3 grid (9 cards)
+  - 4×6 photo paper: 1 card centered
+  - 4×6 ×2: landscape 6" x 4", 2 cards side by side
 - **Cutting buffer**: 0.125" (1/8") gap between cards
 - **Recommended format**: PNG (lossless quality, crisp text and graphics)
 

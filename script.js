@@ -10,17 +10,33 @@ let showCardBorders = false; // Toggle for card borders (color-matched to card e
 let paperSize = 'letter'; // 'letter', '4x6' (single centered card) or '4x6-2up' (two cards, landscape)
 
 // Page layouts in inches. 4x6-2up is a landscape 6"x4" page with two cards side by side.
+// flip: how to turn the sheet over for the back side. The back is mirrored left-to-right on the
+// page, so portrait pages flip side-to-side; the landscape 4x6-2up page is fed short edge first
+// (rotated 90°), so its left-to-right axis runs along the feed direction and it flips end-over-end.
 // markLenTB (optional) shortens the top/bottom cut ticks; 4x6-2up cards sit only 0.25" from
 // the top/bottom edges (0.1875" with border bleed), so 0.15" ticks stay clear of the picture.
 const PAPER_LAYOUTS = {
-    letter:    { pageW: 8.5, pageH: 11, cols: 3, rows: 3, markLen: 0.5,  label: '8.5" × 11"',     fileSuffix: '' },
-    '4x6':     { pageW: 4,   pageH: 6,  cols: 1, rows: 1, markLen: 0.35, label: '4" × 6"',        fileSuffix: '-4x6' },
-    '4x6-2up': { pageW: 6,   pageH: 4,  cols: 2, rows: 1, markLen: 0.35, markLenTB: 0.15, label: '6" × 4" (2-up)', fileSuffix: '-4x6-2up' }
+    letter:    { pageW: 8.5, pageH: 11, cols: 3, rows: 3, flip: 'side', markLen: 0.5,  label: '8.5" × 11"',     fileSuffix: '' },
+    '4x6':     { pageW: 4,   pageH: 6,  cols: 1, rows: 1, flip: 'side', markLen: 0.35, label: '4" × 6"',        fileSuffix: '-4x6' },
+    '4x6-2up': { pageW: 6,   pageH: 4,  cols: 2, rows: 1, flip: 'end',  markLen: 0.35, markLenTB: 0.15, label: '6" × 4" (2-up)', fileSuffix: '-4x6-2up' }
 };
 
 function getLayout() {
     const layout = PAPER_LAYOUTS[paperSize];
     return { ...layout, markLenTB: layout.markLenTB ?? layout.markLen, slots: layout.cols * layout.rows, isLetter: paperSize === 'letter' };
+}
+
+// Step-by-step instructions for reloading the printed sheet to print the backs
+function getFlipInstructions() {
+    const turn = getLayout().flip === 'end'
+        ? 'Turn it over END OVER END: the edge that came out LAST goes in FIRST'
+        : 'Turn it over SIDE TO SIDE (like a book page): the SAME edge goes in first again';
+    return [
+        'Take the printed sheet from the output tray',
+        turn,
+        'Load it in the rear tray with the printed side DOWN (blank side facing up)',
+        'Use the same print settings as the fronts (100% scale, borderless off)'
+    ];
 }
 
 // Slot index whose card sits at position i on the horizontally mirrored back sheet
@@ -91,21 +107,52 @@ function rotateImage90(src) {
     });
 }
 
-// Rotate a placed card's front (or its back) 90° clockwise; only this slot is affected
-async function rotateSlotImage(slotIndex, isBack) {
+// Brighten an image like a Photoshop Brightness/Contrast layer at Brightness +40 (non-legacy):
+// a tone curve that lifts midtones (128 -> ~156) while keeping pure black and white fixed,
+// so highlights don't clip. Returns a lossless PNG data URL.
+const BRIGHTNESS = 40;
+function brightenImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const gamma = 1 / (1 + BRIGHTNESS / 100);
+            const lut = new Uint8ClampedArray(256);
+            for (let v = 0; v < 256; v++) lut[v] = Math.round(255 * Math.pow(v / 255, gamma));
+            const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const px = data.data;
+            for (let p = 0; p < px.length; p += 4) {
+                px[p] = lut[px[p]];
+                px[p + 1] = lut[px[p + 1]];
+                px[p + 2] = lut[px[p + 2]];
+            }
+            ctx.putImageData(data, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+// Apply an image transform (rotate/brighten) to a placed card's front (or its back); only this slot is affected
+async function transformSlotImage(slotIndex, isBack, transform, label) {
     try {
         if (isBack) {
-            cardBacks[slotIndex] = await rotateImage90(cardBacks[slotIndex]);
+            cardBacks[slotIndex] = await transform(cardBacks[slotIndex]);
             cardBackBleeds[slotIndex] = await createBleedImage(cardBacks[slotIndex]);
         } else {
             const card = cardSlots[slotIndex];
-            cardSlots[slotIndex] = { ...card, src: await rotateImage90(card.src) };
+            cardSlots[slotIndex] = { ...card, src: await transform(card.src) };
             cardBleeds[slotIndex] = await createBleedImage(cardSlots[slotIndex].src);
         }
         renderSlots();
     } catch (err) {
-        console.error('Rotate failed:', err);
-        showAlert('Could not rotate this image.', 'error');
+        console.error(`${label} failed:`, err);
+        showAlert(`Could not ${label.toLowerCase()} this image.`, 'error');
     }
 }
 
@@ -117,9 +164,22 @@ function createRotateButton(slotIndex, isBack) {
     rotateBtn.title = isBack === null ? 'Rotate the side showing 90°' : isBack ? 'Rotate back 90°' : 'Rotate card 90°';
     rotateBtn.onclick = (e) => {
         e.stopPropagation();
-        rotateSlotImage(slotIndex, isBack ?? flippedSlots.has(slotIndex));
+        transformSlotImage(slotIndex, isBack ?? flippedSlots.has(slotIndex), rotateImage90, 'Rotate');
     };
     return rotateBtn;
+}
+
+// Same isBack convention as the rotate button; each click adds another +40 brightness step
+function createBrightenButton(slotIndex, isBack) {
+    const brightenBtn = document.createElement('button');
+    brightenBtn.className = 'brighten-card';
+    brightenBtn.innerHTML = '☀';
+    brightenBtn.title = isBack === null ? 'Brighten the side showing (+40)' : isBack ? 'Brighten back (+40)' : 'Brighten card (+40)';
+    brightenBtn.onclick = (e) => {
+        e.stopPropagation();
+        transformSlotImage(slotIndex, isBack ?? flippedSlots.has(slotIndex), brightenImage, 'Brighten');
+    };
+    return brightenBtn;
 }
 
 // DOM Elements
@@ -611,6 +671,7 @@ function renderSheet(sheetElement, isBackSheet) {
                 img.style.objectFit = 'cover';
                 slot.appendChild(img);
                 slot.appendChild(createRotateButton(srcIndex, true));
+                slot.appendChild(createBrightenButton(srcIndex, true));
             } else if (!isBackSheet) {
                 // Front sheet: create flip container
                 const flipContainer = document.createElement('div');
@@ -680,6 +741,7 @@ function renderSheet(sheetElement, isBackSheet) {
                 };
                 slot.appendChild(removeBtn);
                 slot.appendChild(createRotateButton(index, null));
+                slot.appendChild(createBrightenButton(index, null));
 
                 // Show indicator if card has a back
                 if (hasBack) {
@@ -1135,21 +1197,23 @@ function openPrintPreview() {
             }, 100);
         }
 
+        const flipSteps = ${JSON.stringify(getFlipInstructions())};
+
         function startGuidedPrint() {
-            if (confirm('Step 1 of 2: Ready to print the FRONT side?\\n\\nClick OK to open the print dialog for fronts.')) {
+            if (confirm('Step 1 of 2: Ready to print the FRONT side?\\n\\n' +
+                'In the print dialog use Actual Size / 100% scale and turn borderless off.\\n' +
+                'Note which edge of the paper feeds in first.\\n\\nClick OK to open the print dialog for fronts.')) {
                 printPage('front');
 
                 setTimeout(() => {
                     const flipInstructions = 'Step 2 of 2: Print the BACK side\\n\\n' +
-                        '1. Remove the printed sheet from the output tray\\n' +
-                        '2. Flip it over (like turning a page in a book)\\n' +
-                        '3. Place it back in the input tray\\n\\n' +
-                        'Ready to print the backs?';
+                        flipSteps.map((step, i) => (i + 1) + '. ' + step).join('\\n') +
+                        '\\n\\nReady to print the backs?';
 
                     if (confirm(flipInstructions)) {
                         printPage('back');
                         setTimeout(() => {
-                            showAlert('Double-sided printing complete!', 'success');
+                            alert('Double-sided printing complete!');
                         }, 500);
                     }
                 }, 1000);
@@ -1459,7 +1523,9 @@ async function exportPNG(mode) {
         const pxW = Math.round(pageW);
         const pxH = Math.round(pageH);
         const modeLabel = mode === 'both' ? 'front + back' : `${mode}s`;
-        showAlert(`PNG exported (${modeLabel}) at 300 DPI — ${pxW}×${pxH}px.\nOpen in Photoshop for ${pgW}" × ${pgH}" print-ready layout.`, 'success');
+        const printTips = `\n\nIn Photoshop's Print dialog: ${pgW > pgH ? 'Landscape' : 'Portrait'} layout, Scale 100% (Scale to Fit Media off), borderless off, Emulsion Down off.`;
+        const backTips = mode === 'front' ? '' : '\n\nFor the backs:\n' + getFlipInstructions().map((step, i) => `${i + 1}. ${step}`).join('\n');
+        showAlert(`PNG exported (${modeLabel}) at 300 DPI — ${pxW}×${pxH}px.\nOpen in Photoshop for ${pgW}" × ${pgH}" print-ready layout.${printTips}${backTips}`, 'success');
     } catch (error) {
         console.error('Error exporting PNG:', error);
         showAlert('Error exporting PNG. Please try again.', 'error');

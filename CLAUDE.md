@@ -78,6 +78,11 @@ ProCardPrint/
 - `rotateImage90(src)` bakes the rotation into a new lossless PNG data URL, so preview, print preview, PDF and PNG need no rotation logic
 - Front rotation replaces `cardSlots[i]` with a copy (`{...card, src}`), so the library thumbnail and other slots using the same upload are unaffected; the slot's bleed is regenerated after rotating
 
+### Brighten
+- Amber ☀ button on hover (left of ↻) brightens that slot's front or back, same "side showing" rule as Rotate
+- `brightenImage(src)` approximates a Photoshop Brightness/Contrast layer at +40 (non-legacy): per-channel gamma LUT `255*(v/255)^(1/1.4)`, so black/white stay fixed and midtones lift (128 → 156); baked into a PNG like rotation
+- Each click stacks another +40; both buttons go through `transformSlotImage(slotIndex, isBack, transform, label)`, which also regenerates the bleed
+
 ### Card Border Toggle
 - Checkbox in the layout tabs bar, visible when any card is placed
 - When enabled, adds a 0.0625" (`BLEED_IN`) bleed around each card: the card's own outer pixels mirrored outward, so the border looks like a continuation of the card (gradients, textures and per-side colors carry through)
@@ -114,6 +119,7 @@ ProCardPrint/
 - 4×6: grid centered vertically and horizontally via `translate(-50%, -50%)`
 - Page dimensions, grid columns/rows, and slot count all driven by `paperSize`
 - Guided double-sided print workflow with step-by-step confirm dialogs
+- Flip steps come from `getFlipInstructions()` (driven by each layout's `flip`: `'side'` for Letter/4×6, `'end'` for 4×6 ×2, since that landscape page is fed short edge first) and are injected into the preview window as `flipSteps`; the PNG export alert shows the same steps plus Photoshop print settings
 - Card border state carries over to print preview via per-card `card-border-bg` divs inside `card-with-border` wrappers
 
 ### Cut Marks
