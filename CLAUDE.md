@@ -78,10 +78,11 @@ ProCardPrint/
 - `rotateImage90(src)` bakes the rotation into a new lossless PNG data URL, so preview, print preview, PDF and PNG need no rotation logic
 - Front rotation replaces `cardSlots[i]` with a copy (`{...card, src}`), so the library thumbnail and other slots using the same upload are unaffected; the slot's bleed is regenerated after rotating
 
-### Brighten
-- Amber ☀ button on hover (left of ↻) brightens that slot's front or back, same "side showing" rule as Rotate
-- `brightenImage(src)` approximates a Photoshop Brightness/Contrast layer at +40 (non-legacy): per-channel gamma LUT `255*(v/255)^(1/1.4)`, so black/white stay fixed and midtones lift (128 → 156); baked into a PNG like rotation
-- Each click stacks another +40; both buttons go through `transformSlotImage(slotIndex, isBack, transform, label)`, which also regenerates the bleed
+### Brighten Toggle
+- "Brighten +40" checkbox in the layout tabs bar (next to Card Border); `brightenSheet` applies to every front, back and bleed on the sheet; unchecking restores the originals (they are never modified)
+- `brightenImage(src)` approximates a Photoshop Brightness/Contrast layer at +40 (non-legacy): per-channel gamma LUT `255*(v/255)^(1/1.4)`, so black/white stay fixed and midtones lift (128 → 156)
+- `brightCache` maps original data URL → brightened PNG; `ensureBrightened()` fills it (and prunes stale entries); `shown(src)` returns the brightened copy when the toggle is on
+- Every output reads images through `shown()`: preview (`renderSheet`), print preview, PDF, PNG. `renderSlots()` kicks off `ensureBrightened()` and re-renders when it finishes; print preview, PDF and PNG `await ensureBrightened()` first
 
 ### Card Border Toggle
 - Checkbox in the layout tabs bar, visible when any card is placed

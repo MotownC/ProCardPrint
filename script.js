@@ -7,6 +7,7 @@ let cardBackBleeds = Array(9).fill(null); // Cached bleed image (data URL) for e
 let currentSlotForBack = null; // Track which slot is getting a back
 let flippedSlots = new Set(); // Front-sheet slots currently flipped to show their back (survives re-renders)
 let showCardBorders = false; // Toggle for card borders (color-matched to card edges)
+let brightenSheet = false; // Toggle: show/export every image on the sheet brightened (+40)
 let paperSize = 'letter'; // 'letter', '4x6' (single centered card) or '4x6-2up' (two cards, landscape)
 
 // Page layouts in inches. 4x6-2up is a landscape 6"x4" page with two cards side by side.
@@ -138,21 +139,50 @@ function brightenImage(src) {
     });
 }
 
-// Apply an image transform (rotate/brighten) to a placed card's front (or its back); only this slot is affected
-async function transformSlotImage(slotIndex, isBack, transform, label) {
+// Brightened copies of sheet images (original data URL -> brightened PNG), kept apart from the
+// originals so unchecking the Brighten toggle restores them exactly
+const brightCache = new Map();
+
+// The image to display/export for src: its brightened copy while the Brighten toggle is on
+function shown(src) {
+    return brightenSheet && src ? brightCache.get(src) ?? src : src;
+}
+
+function sheetImages() {
+    return [...cardSlots.map(card => card?.src), ...cardBacks, ...cardBleeds, ...cardBackBleeds].filter(Boolean);
+}
+
+// Brighten every image on the sheet (fronts, backs, bleeds) that isn't cached yet; drops stale entries
+async function ensureBrightened() {
+    if (!brightenSheet) return;
+    const current = new Set(sheetImages());
+    for (const src of brightCache.keys()) if (!current.has(src)) brightCache.delete(src);
+    for (const src of current) {
+        if (brightCache.has(src)) continue;
+        try {
+            brightCache.set(src, await brightenImage(src));
+        } catch (err) {
+            console.error('Brighten failed:', err);
+            brightCache.set(src, src);
+        }
+    }
+}
+
+// Rotate a placed card's front (or its back) 90° clockwise; only this slot is affected
+async function rotateSlotImage(slotIndex, isBack) {
     try {
         if (isBack) {
-            cardBacks[slotIndex] = await transform(cardBacks[slotIndex]);
+            cardBacks[slotIndex] = await rotateImage90(cardBacks[slotIndex]);
             cardBackBleeds[slotIndex] = await createBleedImage(cardBacks[slotIndex]);
         } else {
             const card = cardSlots[slotIndex];
-            cardSlots[slotIndex] = { ...card, src: await transform(card.src) };
+            cardSlots[slotIndex] = { ...card, src: await rotateImage90(card.src) };
             cardBleeds[slotIndex] = await createBleedImage(cardSlots[slotIndex].src);
         }
         renderSlots();
     } catch (err) {
-        console.error(`${label} failed:`, err);
-        showAlert(`Could not ${label.toLowerCase()} this image.`, 'error');
+        console.error('Rotate failed:', err);
+        showAlert('Could not rotate this image.', 'error');
     }
 }
 
@@ -164,22 +194,9 @@ function createRotateButton(slotIndex, isBack) {
     rotateBtn.title = isBack === null ? 'Rotate the side showing 90°' : isBack ? 'Rotate back 90°' : 'Rotate card 90°';
     rotateBtn.onclick = (e) => {
         e.stopPropagation();
-        transformSlotImage(slotIndex, isBack ?? flippedSlots.has(slotIndex), rotateImage90, 'Rotate');
+        rotateSlotImage(slotIndex, isBack ?? flippedSlots.has(slotIndex));
     };
     return rotateBtn;
-}
-
-// Same isBack convention as the rotate button; each click adds another +40 brightness step
-function createBrightenButton(slotIndex, isBack) {
-    const brightenBtn = document.createElement('button');
-    brightenBtn.className = 'brighten-card';
-    brightenBtn.innerHTML = '☀';
-    brightenBtn.title = isBack === null ? 'Brighten the side showing (+40)' : isBack ? 'Brighten back (+40)' : 'Brighten card (+40)';
-    brightenBtn.onclick = (e) => {
-        e.stopPropagation();
-        transformSlotImage(slotIndex, isBack ?? flippedSlots.has(slotIndex), brightenImage, 'Brighten');
-    };
-    return brightenBtn;
 }
 
 // DOM Elements
@@ -273,6 +290,12 @@ function setupEventListeners() {
     const borderToggle = document.getElementById('cardBorderToggle');
     borderToggle.addEventListener('change', (e) => {
         showCardBorders = e.target.checked;
+        renderSlots();
+    });
+
+    // Brighten toggle (whole sheet)
+    document.getElementById('brightenToggle').addEventListener('change', (e) => {
+        brightenSheet = e.target.checked;
         renderSlots();
     });
 
@@ -519,7 +542,18 @@ function handleBackFileSelect(e) {
 }
 
 // Render slots
+let brightenPending = false;
+
 function renderSlots() {
+    // Brightened copies are made asynchronously; render the originals now and again once they're ready
+    if (brightenSheet && !brightenPending && sheetImages().some(src => !brightCache.has(src))) {
+        brightenPending = true;
+        ensureBrightened().finally(() => {
+            brightenPending = false;
+            renderSlots();
+        });
+    }
+
     // Render front sheet
     renderSheet(printSheet, false);
 
@@ -657,21 +691,20 @@ function renderSheet(sheetElement, isBackSheet) {
             if (showCardBorders && bleed) {
                 const bleedDiv = document.createElement('div');
                 bleedDiv.className = 'card-bleed';
-                bleedDiv.style.backgroundImage = `url(${bleed})`;
+                bleedDiv.style.backgroundImage = `url(${shown(bleed)})`;
                 slot.appendChild(bleedDiv);
             }
 
             // For back sheet, show the back image directly (no flip container needed)
             if (isBackSheet && hasBack) {
                 const img = document.createElement('img');
-                img.src = back;
+                img.src = shown(back);
                 img.alt = `${card.name} back`;
                 img.style.width = '100%';
                 img.style.height = '100%';
                 img.style.objectFit = 'cover';
                 slot.appendChild(img);
                 slot.appendChild(createRotateButton(srcIndex, true));
-                slot.appendChild(createBrightenButton(srcIndex, true));
             } else if (!isBackSheet) {
                 // Front sheet: create flip container
                 const flipContainer = document.createElement('div');
@@ -687,7 +720,7 @@ function renderSheet(sheetElement, isBackSheet) {
                 const frontFace = document.createElement('div');
                 frontFace.className = 'card-face card-front-face';
                 const frontImg = document.createElement('img');
-                frontImg.src = card.src;
+                frontImg.src = shown(card.src);
                 frontImg.alt = card.name;
                 frontFace.appendChild(frontImg);
                 flipContainer.appendChild(frontFace);
@@ -697,7 +730,7 @@ function renderSheet(sheetElement, isBackSheet) {
                     const backFace = document.createElement('div');
                     backFace.className = 'card-face card-back-face';
                     const backImg = document.createElement('img');
-                    backImg.src = back;
+                    backImg.src = shown(back);
                     backImg.alt = `${card.name} back`;
                     backFace.appendChild(backImg);
                     flipContainer.appendChild(backFace);
@@ -741,7 +774,6 @@ function renderSheet(sheetElement, isBackSheet) {
                 };
                 slot.appendChild(removeBtn);
                 slot.appendChild(createRotateButton(index, null));
-                slot.appendChild(createBrightenButton(index, null));
 
                 // Show indicator if card has a back
                 if (hasBack) {
@@ -847,7 +879,8 @@ function generatePreviewCutMarks() {
 }
 
 // Open Print Preview
-function openPrintPreview() {
+async function openPrintPreview() {
+    await ensureBrightened();
     const layout = getLayout();
     const is4x6 = !layout.isLetter;
     const placedCount = cardSlots.slice(0, layout.slots).filter(slot => slot !== null).length;
@@ -1107,8 +1140,8 @@ function openPrintPreview() {
         const card = cardSlots[i];
         if (card) {
             const bleed = cardBleeds[i];
-            const borderHtml = showCardBorders && bleed ? `<div class="card-border-bg" style="background-image:url(${bleed})"></div>` : '';
-            html += `<div class="card-with-border">${borderHtml}<div class="card"><img src="${card.src}" alt="Card ${i + 1}"></div></div>`;
+            const borderHtml = showCardBorders && bleed ? `<div class="card-border-bg" style="background-image:url(${shown(bleed)})"></div>` : '';
+            html += `<div class="card-with-border">${borderHtml}<div class="card"><img src="${shown(card.src)}" alt="Card ${i + 1}"></div></div>`;
         } else {
             html += `<div class="card-with-border"><div class="card"></div></div>`;
         }
@@ -1136,8 +1169,8 @@ function openPrintPreview() {
             const back = cardBacks[mirroredIndex];
             if (back) {
                 const bleed = cardBackBleeds[mirroredIndex];
-                const borderHtml = showCardBorders && bleed ? `<div class="card-border-bg" style="background-image:url(${bleed})"></div>` : '';
-                html += `<div class="card-with-border">${borderHtml}<div class="card"><img src="${back}" alt="Card ${mirroredIndex + 1} back"></div></div>`;
+                const borderHtml = showCardBorders && bleed ? `<div class="card-border-bg" style="background-image:url(${shown(bleed)})"></div>` : '';
+                html += `<div class="card-with-border">${borderHtml}<div class="card"><img src="${shown(back)}" alt="Card ${mirroredIndex + 1} back"></div></div>`;
             } else {
                 html += `<div class="card-with-border"><div class="card"></div></div>`;
             }
@@ -1232,6 +1265,7 @@ function openPrintPreview() {
 async function generatePDF(mode) {
     // Close dropdown
     document.getElementById('pdfDropdownMenu').classList.remove('open');
+    await ensureBrightened();
 
     const layout = getLayout();
     const is4x6 = !layout.isLetter;
@@ -1322,11 +1356,11 @@ async function generatePDF(mode) {
                     const y = marginY + (row * (cardHeight + spacing));
 
                     if (showCardBorders && cardBleeds[i]) {
-                        pdf.addImage(cardBleeds[i], 'JPEG', x - BLEED_IN, y - BLEED_IN, cardWidth + BLEED_IN * 2, cardHeight + BLEED_IN * 2);
+                        pdf.addImage(shown(cardBleeds[i]), 'JPEG', x - BLEED_IN, y - BLEED_IN, cardWidth + BLEED_IN * 2, cardHeight + BLEED_IN * 2);
                     }
 
                     try {
-                        pdf.addImage(card.src, 'JPEG', x, y, cardWidth, cardHeight);
+                        pdf.addImage(shown(card.src), 'JPEG', x, y, cardWidth, cardHeight);
                     } catch (error) {
                         console.error(`Error adding card ${i}:`, error);
                     }
@@ -1355,11 +1389,11 @@ async function generatePDF(mode) {
                     const y = marginY + (row * (cardHeight + spacing));
 
                     if (showCardBorders && cardBackBleeds[i]) {
-                        pdf.addImage(cardBackBleeds[i], 'JPEG', x - BLEED_IN, y - BLEED_IN, cardWidth + BLEED_IN * 2, cardHeight + BLEED_IN * 2);
+                        pdf.addImage(shown(cardBackBleeds[i]), 'JPEG', x - BLEED_IN, y - BLEED_IN, cardWidth + BLEED_IN * 2, cardHeight + BLEED_IN * 2);
                     }
 
                     try {
-                        pdf.addImage(back, 'JPEG', x, y, cardWidth, cardHeight);
+                        pdf.addImage(shown(back), 'JPEG', x, y, cardWidth, cardHeight);
                     } catch (error) {
                         console.error(`Error adding back for card ${i}:`, error);
                     }
@@ -1390,6 +1424,7 @@ async function generatePDF(mode) {
 async function exportPNG(mode) {
     // Close dropdown
     document.getElementById('pdfDropdownMenu').classList.remove('open');
+    await ensureBrightened();
 
     const layout = getLayout();
     const is4x6 = !layout.isLetter;
@@ -1453,7 +1488,7 @@ async function exportPNG(mode) {
 
             // Draws the bleed (if any) first so the card always sits on top of it
             const drawCard = async (src, col, row, bleedSrc) => {
-                const [img, bleedImg] = await Promise.all([loadImage(src), bleedSrc ? loadImage(bleedSrc) : null]);
+                const [img, bleedImg] = await Promise.all([loadImage(shown(src)), bleedSrc ? loadImage(shown(bleedSrc)) : null]);
                 const x = offsetX + (col * (cardW + gap));
                 const y = offsetY + (row * (cardH + gap));
                 const bp = BLEED_IN * DPI;

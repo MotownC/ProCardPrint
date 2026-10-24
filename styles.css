@@ -677,34 +677,6 @@ header h1 .highlight {
 .card-slot.filled:hover .rotate-card {
     display: flex;
 }
-
-/* Brighten Button - sits left of the rotate button */
-.card-slot .brighten-card {
-    position: absolute;
-    top: 8px;
-    right: 80px;
-    width: 28px;
-    height: 28px;
-    background: rgba(245, 158, 11, 0.9);
-    border: none;
-    border-radius: 50%;
-    color: white;
-    cursor: pointer;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    z-index: 100;
-}
-
-#backSheet .card-slot .brighten-card {
-    right: 44px;
-}
-
-.card-slot.filled:hover .brighten-card {
-    display: flex;
-}
-
 /* Add Back Button */
 .card-slot .add-back-btn {
     position: absolute;
